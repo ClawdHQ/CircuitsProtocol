@@ -22,3 +22,4 @@ packages/clawmem/data/
 # misc
 .DS_Store
 *.log
+packages/*/src/generated/
