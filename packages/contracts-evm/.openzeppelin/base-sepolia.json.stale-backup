@@ -1,0 +1,574 @@
+{
+  "manifestVersion": "3.2",
+  "proxies": [
+    {
+      "address": "0xcB30D334c9fb9F7c0e753ef413f5233ACFBC3fAd",
+      "txHash": "0x374ab337923ab618e2f963b9778dd0eb6d7ab0623958a74d8adf8bbe02c2a2a8",
+      "kind": "uups"
+    }
+  ],
+  "impls": {
+    "00a0cd0c9d5ca82f801fc5129e35645ffeac775167c5698a8464a81004a46771": {
+      "address": "0x0038D773d7dd482b250D64183002Ae8579110Cf9",
+      "txHash": "0xa37df5e6d583e4a10a05e19f198913c4c9fb30cb63f8a0aba991a8c1306d65dc",
+      "layout": {
+        "solcVersion": "0.8.24",
+        "storage": [
+          {
+            "label": "usdc",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_contract(IERC20)1636",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:105"
+          },
+          {
+            "label": "treasury",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_address",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:106"
+          },
+          {
+            "label": "registrationFee",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:108"
+          },
+          {
+            "label": "protocolFeeBps",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:109"
+          },
+          {
+            "label": "totalAgents",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:111"
+          },
+          {
+            "label": "activeAgents",
+            "offset": 0,
+            "slot": "5",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:112"
+          },
+          {
+            "label": "totalJobs",
+            "offset": 0,
+            "slot": "6",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:113"
+          },
+          {
+            "label": "totalVolume",
+            "offset": 0,
+            "slot": "7",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:114"
+          },
+          {
+            "label": "_nextAgentId",
+            "offset": 0,
+            "slot": "8",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:116"
+          },
+          {
+            "label": "_nextJobId",
+            "offset": 0,
+            "slot": "9",
+            "type": "t_uint256",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:117"
+          },
+          {
+            "label": "agents",
+            "offset": 0,
+            "slot": "10",
+            "type": "t_mapping(t_uint256,t_struct(AgentCard)3035_storage)",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:119"
+          },
+          {
+            "label": "agentsByOwner",
+            "offset": 0,
+            "slot": "11",
+            "type": "t_mapping(t_address,t_array(t_uint256)dyn_storage)",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:120"
+          },
+          {
+            "label": "agentIdByNameHash",
+            "offset": 0,
+            "slot": "12",
+            "type": "t_mapping(t_bytes32,t_uint256)",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:121"
+          },
+          {
+            "label": "agentExchangeApproval",
+            "offset": 0,
+            "slot": "13",
+            "type": "t_mapping(t_uint256,t_address)",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:126"
+          },
+          {
+            "label": "jobs",
+            "offset": 0,
+            "slot": "14",
+            "type": "t_mapping(t_uint256,t_struct(Job)3063_storage)",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:128"
+          },
+          {
+            "label": "escrowRecords",
+            "offset": 0,
+            "slot": "15",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:129"
+          },
+          {
+            "label": "stakingContract",
+            "offset": 0,
+            "slot": "16",
+            "type": "t_address",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:135"
+          },
+          {
+            "label": "evaluatorPoolContract",
+            "offset": 0,
+            "slot": "17",
+            "type": "t_address",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:141"
+          },
+          {
+            "label": "trustedNegotiationContracts",
+            "offset": 0,
+            "slot": "18",
+            "type": "t_mapping(t_address,t_bool)",
+            "contract": "ClawdHQCore",
+            "src": "contracts/ClawdHQCore.sol:146"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bool": {
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_bytes32": {
+            "label": "bytes32",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_struct(RoleData)24_storage)": {
+            "label": "mapping(bytes32 => struct AccessControlUpgradeable.RoleData)",
+            "numberOfBytes": "32"
+          },
+          "t_struct(AccessControlStorage)34_storage": {
+            "label": "struct AccessControlUpgradeable.AccessControlStorage",
+            "members": [
+              {
+                "label": "_roles",
+                "type": "t_mapping(t_bytes32,t_struct(RoleData)24_storage)",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(InitializableStorage)515_storage": {
+            "label": "struct Initializable.InitializableStorage",
+            "members": [
+              {
+                "label": "_initialized",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "_initializing",
+                "type": "t_bool",
+                "offset": 8,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(PausableStorage)187_storage": {
+            "label": "struct PausableUpgradeable.PausableStorage",
+            "members": [
+              {
+                "label": "_paused",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "0"
+              }
+            ],
+            "numberOfBytes": "32"
+          },
+          "t_struct(RoleData)24_storage": {
+            "label": "struct AccessControlUpgradeable.RoleData",
+            "members": [
+              {
+                "label": "hasRole",
+                "type": "t_mapping(t_address,t_bool)",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "adminRole",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "1"
+              }
+            ],
+            "numberOfBytes": "64"
+          },
+          "t_uint64": {
+            "label": "uint64",
+            "numberOfBytes": "8"
+          },
+          "t_array(t_uint256)dyn_storage": {
+            "label": "uint256[]",
+            "numberOfBytes": "32"
+          },
+          "t_contract(IERC20)1636": {
+            "label": "contract IERC20",
+            "numberOfBytes": "20"
+          },
+          "t_enum(AgentTier)2990": {
+            "label": "enum ClawdHQCore.AgentTier",
+            "members": [
+              "Basic",
+              "Verified",
+              "Elite"
+            ],
+            "numberOfBytes": "1"
+          },
+          "t_enum(JobStatus)2997": {
+            "label": "enum ClawdHQCore.JobStatus",
+            "members": [
+              "Pending",
+              "Active",
+              "Completed",
+              "Disputed",
+              "Cancelled",
+              "Resolved"
+            ],
+            "numberOfBytes": "1"
+          },
+          "t_mapping(t_address,t_array(t_uint256)dyn_storage)": {
+            "label": "mapping(address => uint256[])",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_uint256)": {
+            "label": "mapping(bytes32 => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_address)": {
+            "label": "mapping(uint256 => address)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(AgentCard)3035_storage)": {
+            "label": "mapping(uint256 => struct ClawdHQCore.AgentCard)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_struct(Job)3063_storage)": {
+            "label": "mapping(uint256 => struct ClawdHQCore.Job)",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_uint256,t_uint256)": {
+            "label": "mapping(uint256 => uint256)",
+            "numberOfBytes": "32"
+          },
+          "t_string_storage": {
+            "label": "string",
+            "numberOfBytes": "32"
+          },
+          "t_struct(AgentCard)3035_storage": {
+            "label": "struct ClawdHQCore.AgentCard",
+            "members": [
+              {
+                "label": "agentId",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "owner",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "name",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "agentURI",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "endpoint",
+                "type": "t_string_storage",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "metadataHash",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "supportsX402",
+                "type": "t_bool",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "supportsA2A",
+                "type": "t_bool",
+                "offset": 1,
+                "slot": "6"
+              },
+              {
+                "label": "supportsMCP",
+                "type": "t_bool",
+                "offset": 2,
+                "slot": "6"
+              },
+              {
+                "label": "active",
+                "type": "t_bool",
+                "offset": 3,
+                "slot": "6"
+              },
+              {
+                "label": "tier",
+                "type": "t_enum(AgentTier)2990",
+                "offset": 4,
+                "slot": "6"
+              },
+              {
+                "label": "createdAt",
+                "type": "t_uint64",
+                "offset": 5,
+                "slot": "6"
+              },
+              {
+                "label": "updatedAt",
+                "type": "t_uint64",
+                "offset": 13,
+                "slot": "6"
+              },
+              {
+                "label": "lastJobAt",
+                "type": "t_uint64",
+                "offset": 21,
+                "slot": "6"
+              },
+              {
+                "label": "jobsCompleted",
+                "type": "t_uint32",
+                "offset": 0,
+                "slot": "7"
+              },
+              {
+                "label": "jobsFailed",
+                "type": "t_uint32",
+                "offset": 4,
+                "slot": "7"
+              },
+              {
+                "label": "usdcRevenue",
+                "type": "t_uint128",
+                "offset": 8,
+                "slot": "7"
+              },
+              {
+                "label": "reputationBps",
+                "type": "t_uint16",
+                "offset": 24,
+                "slot": "7"
+              }
+            ],
+            "numberOfBytes": "256"
+          },
+          "t_struct(Job)3063_storage": {
+            "label": "struct ClawdHQCore.Job",
+            "members": [
+              {
+                "label": "jobId",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "0"
+              },
+              {
+                "label": "employer",
+                "type": "t_address",
+                "offset": 0,
+                "slot": "1"
+              },
+              {
+                "label": "employerAgentId",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "2"
+              },
+              {
+                "label": "hiredAgentId",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "3"
+              },
+              {
+                "label": "taskHash",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "4"
+              },
+              {
+                "label": "budget",
+                "type": "t_uint256",
+                "offset": 0,
+                "slot": "5"
+              },
+              {
+                "label": "status",
+                "type": "t_enum(JobStatus)2997",
+                "offset": 0,
+                "slot": "6"
+              },
+              {
+                "label": "createdAt",
+                "type": "t_uint64",
+                "offset": 1,
+                "slot": "6"
+              },
+              {
+                "label": "deadline",
+                "type": "t_uint64",
+                "offset": 9,
+                "slot": "6"
+              },
+              {
+                "label": "startedAt",
+                "type": "t_uint64",
+                "offset": 17,
+                "slot": "6"
+              },
+              {
+                "label": "completedAt",
+                "type": "t_uint64",
+                "offset": 0,
+                "slot": "7"
+              },
+              {
+                "label": "deliverableHash",
+                "type": "t_bytes32",
+                "offset": 0,
+                "slot": "8"
+              },
+              {
+                "label": "rating",
+                "type": "t_uint8",
+                "offset": 0,
+                "slot": "9"
+              }
+            ],
+            "numberOfBytes": "320"
+          },
+          "t_uint128": {
+            "label": "uint128",
+            "numberOfBytes": "16"
+          },
+          "t_uint16": {
+            "label": "uint16",
+            "numberOfBytes": "2"
+          },
+          "t_uint256": {
+            "label": "uint256",
+            "numberOfBytes": "32"
+          },
+          "t_uint32": {
+            "label": "uint32",
+            "numberOfBytes": "4"
+          },
+          "t_uint8": {
+            "label": "uint8",
+            "numberOfBytes": "1"
+          }
+        },
+        "namespaces": {
+          "erc7201:openzeppelin.storage.Pausable": [
+            {
+              "contract": "PausableUpgradeable",
+              "label": "_paused",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol:21",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.AccessControl": [
+            {
+              "contract": "AccessControlUpgradeable",
+              "label": "_roles",
+              "type": "t_mapping(t_bytes32,t_struct(RoleData)24_storage)",
+              "src": "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol:61",
+              "offset": 0,
+              "slot": "0"
+            }
+          ],
+          "erc7201:openzeppelin.storage.Initializable": [
+            {
+              "contract": "Initializable",
+              "label": "_initialized",
+              "type": "t_uint64",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:69",
+              "offset": 0,
+              "slot": "0"
+            },
+            {
+              "contract": "Initializable",
+              "label": "_initializing",
+              "type": "t_bool",
+              "src": "@openzeppelin/contracts/proxy/utils/Initializable.sol:73",
+              "offset": 8,
+              "slot": "0"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
