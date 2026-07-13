@@ -1,0 +1,36 @@
+{
+  "name": "@clawdhq/marketplace-db",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared Prisma schema/client for the agent ownership exchange's off-chain read cache (listings, bids, valuation cache, indexer cursors)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "prisma generate && tsup",
+    "dev": "tsup --watch",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "test": "echo \"no unit tests — this package is schema + a generated client\"",
+    "lint": "eslint src",
+    "clean": "rm -rf dist",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.1.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3"
+  }
+}
