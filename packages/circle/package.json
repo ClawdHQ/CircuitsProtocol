@@ -1,0 +1,43 @@
+{
+  "name": "@clawdhq/circle",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Portable (non-Next.js) home for every Circle developer-platform integration this app uses: Circle Wallets (owner-facing embedded wallets), CCTP/Bridge Kit (cross-chain USDC into Arc), and Gateway (unified USDC balance / instant settlement — the primitive Circle now markets as Nanopayments). Consumed by apps/web (owner-triggered routes) and, for the Gateway settlement path, the same custody-core execution engine the x402 facilitator already uses.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"no unit tests yet\"",
+    "lint": "eslint src",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@circle-fin/adapter-solana": "^1.6.1",
+    "@circle-fin/adapter-viem-v2": "^1.12.1",
+    "@circle-fin/bridge-kit": "^1.11.1",
+    "@circle-fin/developer-controlled-wallets": "^10.8.0",
+    "@circle-fin/provider-cctp-v2": "^1.8.5",
+    "@circle-fin/user-controlled-wallets": "^10.8.0"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "viem": "^2.53.1"
+  },
+  "devDependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3",
+    "viem": "^2.53.1"
+  }
+}
