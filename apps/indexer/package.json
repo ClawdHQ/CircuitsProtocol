@@ -1,0 +1,37 @@
+{
+  "name": "@clawdhq/indexer",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Long-running service mirroring on-chain agent-exchange events into the shared Postgres read cache (packages/marketplace-db). Never the source of truth for writes — see packages/marketplace-db/prisma/schema.prisma.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "dev:scheduler": "tsx watch src/scheduler.ts",
+    "dev:hosted-runtime-scheduler": "tsx watch src/hostedRuntimeScheduler.ts",
+    "local-dev:rotate-registrar": "tsx scripts/rotate-local-registrar.ts",
+    "start": "node dist/main.js",
+    "start:scheduler": "node dist/scheduler.js",
+    "start:hosted-runtime-scheduler": "node dist/hostedRuntimeScheduler.js",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@clawdhq/custody-core": "workspace:*",
+    "@clawdhq/custody-db": "workspace:*",
+    "@clawdhq/hosted-agent-runtime": "workspace:*",
+    "@clawdhq/marketplace-db": "workspace:*",
+    "@clawdhq/sdk": "workspace:*",
+    "@clawdhq/valuation": "workspace:*",
+    "dotenv": "^17.4.2",
+    "viem": "^2.53.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
