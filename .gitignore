@@ -1,0 +1,24 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+coverage.json
+
+# Hardhat
+packages/contracts-evm/artifacts/
+packages/contracts-evm/cache/
+packages/contracts-evm/typechain-types/
+
+# ClawMem local db
+packages/clawmem/data/
+*.db
+
+# env
+.env
+.env.local
+.env.*.local
+
+# misc
+.DS_Store
+*.log

@@ -1,0 +1,11 @@
+{
+  "name": "@clawdhq/config",
+  "version": "0.0.1",
+  "private": true,
+  "main": "index.js",
+  "exports": {
+    "./tailwind-tokens": "./tailwind-tokens.js",
+    "./tailwind-preset": "./tailwind-preset.js",
+    "./tsconfig.base.json": "./tsconfig.base.json"
+  }
+}
