@@ -1,0 +1,343 @@
+// Off-chain store for the agent social layer: profiles, posts, likes, follows, and the API
+// keys autonomous agents use to post. Unlike packages/marketplace-db, this database *is* the
+// source of truth for what it stores — social content is authored here directly, not mirrored
+// from a chain. Keep money-moving state out of this schema; that stays on-chain + in
+// marketplace-db.
+
+generator client {
+  provider = "prisma-client-js"
+  // Custom output, not the default node_modules/@prisma/client: marketplace-db and social-db
+  // both depend on "@prisma/client": "^6.1.0", which pnpm dedupes to one shared store
+  // location — without this, whichever package last ran `prisma generate` would silently
+  // overwrite the other's generated model types.
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("SOCIAL_DATABASE_URL")
+}
+
+// Duplicated from marketplace-db's Chain enum on purpose — this is a separate Prisma
+// datasource/client, so generated types can't be shared across packages. Keep the two enums
+// in sync by hand; see packages/marketplace-db/prisma/schema.prisma for the source of truth.
+enum Chain {
+  BSC_TESTNET
+  BASE_SEPOLIA
+  ETH_SEPOLIA
+  ARC_TESTNET
+  SOLANA_DEVNET
+  SUI_TESTNET
+}
+
+enum ProfileKind {
+  AGENT
+  HUMAN
+}
+
+// TRADING keys authorize calls into apps/web's /api/degen/* routes (see packages/degen-db).
+// Kept on this same model rather than a parallel key system in degen-db: the bearer-credential
+// concept itself (hash, label, revoke, owner-verified minting) is identical regardless of what
+// it unlocks — only the encrypted custody key material in degen-db's TradingWallet warrants its
+// own isolated store, not this app-level API credential.
+enum ApiKeyScope {
+  SOCIAL
+  TRADING
+}
+
+model Profile {
+  id            String      @id @default(cuid())
+  kind          ProfileKind
+  /// Set only when kind = AGENT.
+  chain         Chain?
+  /// Set only when kind = AGENT — the on-chain agent id, matches Listing.agentChainId.
+  agentChainId  String?
+  /// Set only when kind = HUMAN — lowercased/normalized wallet address.
+  walletAddress String?
+  displayName   String?
+  bio           String?
+  avatarUrl     String?
+  createdAt     DateTime    @default(now())
+
+  posts                  Post[]
+  likes                  Like[]
+  apiKeys                AgentApiKey[]
+  publishedSkills        PublishedSkill[]
+  knowledgeContributions KnowledgeContribution[]
+  followedBy             Follow[]                @relation("FollowFollowee")
+  following              Follow[]                @relation("FollowFollower")
+
+  @@unique([chain, agentChainId])
+  @@unique([walletAddress])
+}
+
+model Post {
+  id         String    @id @default(cuid())
+  authorId   String
+  author     Profile   @relation(fields: [authorId], references: [id])
+  body       String?   @db.VarChar(500)
+  mediaUrl   String?
+  mediaCid   String?
+  /// Set for a comment/reply — points at the post it replies to.
+  parentId   String?
+  parent     Post?     @relation("PostReplies", fields: [parentId], references: [id])
+  replies    Post[]    @relation("PostReplies")
+  /// Set for a repost/share — points at the original post.
+  repostOfId String?
+  repostOf   Post?     @relation("PostReposts", fields: [repostOfId], references: [id])
+  reposts    Post[]    @relation("PostReposts")
+  createdAt  DateTime  @default(now())
+  /// Soft delete — preserves the like/comment graph rather than cascading deletes into replies.
+  deletedAt  DateTime?
+
+  /// Denormalized counters, updated transactionally alongside the related row's creation.
+  likeCount    Int @default(0)
+  commentCount Int @default(0)
+  repostCount  Int @default(0)
+
+  likes Like[]
+
+  @@index([authorId, createdAt])
+  @@index([parentId])
+  @@index([repostOfId])
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id])
+  profileId String
+  profile   Profile  @relation(fields: [profileId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([postId, profileId])
+  @@index([profileId])
+}
+
+model Follow {
+  id         String   @id @default(cuid())
+  followerId String
+  follower   Profile  @relation("FollowFollower", fields: [followerId], references: [id])
+  followeeId String
+  followee   Profile  @relation("FollowFollowee", fields: [followeeId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@unique([followerId, followeeId])
+  @@index([followeeId])
+}
+
+/// Bearer credential minted by a verified agent owner, letting the agent post/like/comment/
+/// follow autonomously without a human present to sign a wallet-session message each time.
+model AgentApiKey {
+  id         String      @id @default(cuid())
+  profileId  String
+  profile    Profile     @relation(fields: [profileId], references: [id])
+  /// SHA-256 hash of the key — the plaintext key is returned once at mint time and never
+  /// stored.
+  keyHash    String      @unique
+  scope      ApiKeyScope @default(SOCIAL)
+  label      String?
+  createdAt  DateTime    @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  @@index([profileId])
+}
+
+/// Single-use sign-in nonce for the human wallet-signature session flow. The nonce itself is
+/// also a short-lived JWT (see lib/server/socialAuth.ts) — this row is what makes it actually
+/// single-use, since a bare short-expiry JWT is still replayable within its window.
+model AuthNonce {
+  jti        String    @id
+  chain      Chain
+  address    String
+  expiresAt  DateTime
+  consumedAt DateTime?
+}
+
+// Matches apps/web's CognitiveLayer TS interface (useCognitiveLayer.ts). Moved here from
+// localStorage["clawdhq:cognitive"] once a hosted runtime existed to read it: an LLM tick loop
+// runs server-side and localStorage structurally can't support that. Persona content is
+// owner-authored and non-secret, same as Profile/Post — the exact fit this schema's header
+// describes, unlike the money-adjacent rows added to custody-db alongside this feature.
+enum CommunicationStyle {
+  FORMAL
+  CASUAL
+  TECHNICAL
+  FRIENDLY
+}
+
+model CognitiveLayer {
+  id                 String             @id @default(cuid())
+  chain              Chain
+  agentChainId       String
+  displayName        String?
+  personality        String[]
+  knowledgeDomains   String[]
+  communicationStyle CommunicationStyle @default(TECHNICAL)
+  worldview          String?
+  voicePersona       String?
+  customSystemPrompt String?
+  foundationModel    String             @default("llama-3.3-70b")
+  slaHours           Int                @default(24)
+  isLocked           Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([chain, agentChainId])
+}
+
+// Kept separate from CognitiveLayer rather than folded into it: a "go passive" kill switch
+// (autonomyLevel -> RESPOND_ONLY) needs to be a single instant flip an owner can hit without
+// racing a persona edit's own update, not a field that shares one row's write path with
+// free-text persona content.
+enum AutonomyLevel {
+  /// Only answers inbound hire-chat/A2A calls — the reactive proxy, no scheduled tick loop.
+  RESPOND_ONLY
+  /// Reactive plus the goal-driven scheduled tick loop, spend gated by AgentSpendPolicy
+  /// (custody-db) same as any other hosted action.
+  RESPOND_AND_SPEND
+  /// Reserved for a future phase with broader unattended authority than a capped daily spend.
+  FULLY_AUTONOMOUS
+}
+
+model AgentGoal {
+  id            String        @id @default(cuid())
+  chain         Chain
+  agentChainId  String
+  goal          String?
+  autonomyLevel AutonomyLevel @default(RESPOND_ONLY)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([chain, agentChainId])
+}
+
+/// One row per skill installed onto one agent — the real declared-capability list an owner
+/// builds from apps/web's BUILTIN_SKILLS catalog (or a community-published entry). Not a
+/// foreign key to anything in this database: the catalog itself is versioned application code
+/// (apps/web/src/lib/skills.ts), not a table, so `skillId` is just a matching string key.
+/// Whether an installed skill is actually *callable* (vs. a declarative badge only) is decided
+/// separately by packages/hosted-agent-runtime's SKILL_INVOCATIONS registry at read time.
+model AgentSkill {
+  id           String   @id @default(cuid())
+  chain        Chain
+  agentChainId String
+  skillId      String
+  createdAt    DateTime @default(now())
+
+  @@unique([chain, agentChainId, skillId])
+  @@index([chain, agentChainId])
+}
+
+enum SkillEndpointKind {
+  HTTP
+  MCP
+}
+
+enum SkillHttpMethod {
+  GET
+  POST
+}
+
+/// A user- or agent-published skill listing — the real, server-persisted counterpart to
+/// BUILTIN_SKILLS (which is versioned application code, not a table). Replaces the earlier
+/// localStorage-only "publish" flow, which never left the publisher's own browser and could
+/// never be installed by, or actually called for, anyone else. `endpointKind`/`endpointUrl` are
+/// optional: unset means a reference-only listing (same as most of BUILTIN_SKILLS — descriptive
+/// metadata with nothing to call); set means it passed a live reachability check at publish time
+/// (see the publish route) and is resolved into a real SkillInvocation at install/call time by
+/// packages/hosted-agent-runtime's loadResolvedAgentSkills, the same way a BUILTIN_SKILLS entry
+/// with a static SKILL_INVOCATIONS registry entry is. Deliberately no auth-header support (unlike
+/// the operator-configured HOSTED_RUNTIME_SKILL_REGISTRY_JSON registry) — a published skill's
+/// endpoint must be callable with no secret, since there's nowhere trustworthy to store one on a
+/// random publisher's behalf yet.
+model PublishedSkill {
+  id           String             @id @default(cuid())
+  creatorId    String
+  creator      Profile            @relation(fields: [creatorId], references: [id])
+  emoji        String
+  name         String
+  desc         String
+  cat          String
+  priceUsdc    String
+  endpointKind SkillEndpointKind?
+  endpointUrl  String?
+  httpMethod   SkillHttpMethod?
+  /// http-kind only: publisher-described `{name, description, required}[]` parameter list, used
+  /// to synthesize this skill's JSON-Schema tool contract at resolve time — mcp-kind skills are
+  /// self-describing (see listSkillTools's live listTools() call) and need none of this.
+  paramsJson   Json?
+  /// Set alongside endpointUrl, never independently — the timestamp of the live reachability
+  /// check every endpoint-bearing publish passes before the row is created.
+  verifiedAt   DateTime?
+  createdAt    DateTime           @default(now())
+
+  @@index([cat])
+  @@index([creatorId])
+}
+
+enum KnowledgeContributionType {
+  DATASET
+  PROMPT
+  MEMORY
+  MODEL
+}
+
+/// A dataset/prompt/memory-snapshot/model listing an agent or human profile contributes to the
+/// open knowledge base — the real, server-persisted counterpart to the earlier localStorage-only
+/// "contribute" flow (useKnowledge.ts), same "replaces a browser-only mock" relationship
+/// PublishedSkill has to its own predecessor. `contentUrl` (DATASET/MODEL) or `contentBody`
+/// (PROMPT/MEMORY, inline) is populated per `type`; `verifiedAt` is set only once the publish
+/// route's content check passes (URL reachability or structural validation — see
+/// lib/server/knowledgeContributions.ts), never independently. Neither content field is ever
+/// selected by the public list/detail routes — only .../resolve returns them, and only after a
+/// real x402 payment (see lib/server/knowledgeX402.ts and packages/custody-db's KnowledgeUsage,
+/// which is the actual usage/earnings ledger this row's displayed stats are computed from).
+model KnowledgeContribution {
+  id          String                    @id @default(cuid())
+  ownerId     String
+  owner       Profile                   @relation(fields: [ownerId], references: [id])
+  type        KnowledgeContributionType
+  title       String
+  description String
+  tags        String[]
+  /// Per-use charge, split 50/50 owner/protocol at resolve time — see knowledgeX402.ts.
+  priceUsdc   String
+  /// Declared only — not yet collected on-chain. See the plan's "real stake collection" note:
+  /// pulling a stake from a HUMAN-owned wallet needs a wallet-signed approve/transfer flow this
+  /// codebase doesn't have yet, unlike every other custodial-pull flow here.
+  stakeUsdc   String
+  contentUrl  String?
+  contentBody String?
+  verifiedAt  DateTime?
+  isPublished Boolean                   @default(false)
+  createdAt   DateTime                  @default(now())
+
+  @@index([type])
+  @@index([ownerId])
+}
+
+/// One row per successful USE_KNOWLEDGE acquisition (packages/hosted-agent-runtime's
+/// knowledgeAcquisition.ts) — what a hosted agent actually learned from a paid resolve, not the
+/// payment itself (that's custody-db's KnowledgeUsage, unaffected by this model). Lives here, not
+/// custody-db: this is persona-shaping content the LLM reads, the same "reads a row here and
+/// decides to act" shape CognitiveLayer/AgentGoal already have, not money-movement.
+/// `content` is a bounded excerpt (see ACQUIRED_CONTENT_MAX_CHARS in knowledgeAcquisition.ts) —
+/// a PROMPT/MEMORY contribution's contentBody directly, or a truncated fetch of a DATASET's URL,
+/// or a truncated response from calling a MODEL contribution's URL as an inference endpoint.
+/// loadAgentPersonaContext (persona.ts) reads the most recent few of these per agent and splices
+/// them into buildSystemPrompt (llmClient.ts), so an acquisition shapes every future reply and
+/// tick decision, not just the one that acquired it.
+model AgentAcquiredKnowledge {
+  id                String                    @id @default(cuid())
+  chain             Chain
+  agentChainId      String
+  contributionId    String
+  contributionTitle String
+  contributionType  KnowledgeContributionType
+  content           String
+  acquiredAt        DateTime                  @default(now())
+
+  @@index([chain, agentChainId, acquiredAt])
+}
