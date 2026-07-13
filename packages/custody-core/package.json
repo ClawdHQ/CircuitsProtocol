@@ -1,0 +1,54 @@
+{
+  "name": "@clawdhq/custody-core",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Portable (non-Next.js) implementation of every feature that custodies a private key server-side and autonomously signs with it — envelope encryption, EVM signing helpers, and the Subscriptions execution engine (risk gate, run pipeline, job relay, withdraw). Consumed by both apps/web (owner-triggered routes) and apps/indexer (the autonomous scheduler) so this security-critical code has exactly one copy.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./skill-catalog": {
+      "types": "./dist/skillCatalog.d.ts",
+      "import": "./dist/skillCatalog.js",
+      "require": "./dist/skillCatalog.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"no unit tests yet\"",
+    "lint": "eslint src",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@clawdhq/custody-db": "workspace:*",
+    "@clawdhq/sdk": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.1.8"
+  },
+  "peerDependencies": {
+    "viem": "^2.53.1",
+    "@solana/web3.js": "^1.98.4",
+    "@solana/spl-token": "^0.4.14",
+    "@coral-xyz/anchor": "^0.31.1",
+    "@mysten/sui": "^2.20.1",
+    "bs58": "^6.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3",
+    "viem": "^2.53.1",
+    "@solana/web3.js": "^1.98.4",
+    "@solana/spl-token": "^0.4.14",
+    "@coral-xyz/anchor": "^0.31.1",
+    "@mysten/sui": "^2.20.1",
+    "bs58": "^6.0.0"
+  }
+}
