@@ -1,0 +1,641 @@
+// Store for every feature in this app that has the app's own backend custody a private key and
+// autonomously sign with it — Subscriptions' per-subscription wallets now, the x402 facilitator
+// later. Isolated from marketplace-db/social-db/degen-db on purpose: this is a second schema
+// (alongside degen-db) that ever holds encrypted private key material for real custodied funds,
+// so it gets its own database, its own migration history, and (in production) its own access
+// boundary — same reasoning degen-db's own schema comment documents, deliberately not folded
+// into that package since Subscriptions/x402 aren't a trading-venue concept (Degen's `Venue`
+// enum doesn't fit) and not into marketplace-db either, since that package's own header states
+// it's "never the source of truth for anything that moves money" — a scheduler or relay route
+// that reads a row here and decides to sign+broadcast is exactly the kind of write this schema
+// is built to authorize, which marketplace-db is explicitly built to never be trusted for.
+//
+// Authority model:
+//  - Subscription IS the source of truth for what should run and when — pure app-level policy,
+//    no on-chain equivalent to mirror.
+//  - SubscriptionWallet holds the custodied signing key for one subscription's on-chain
+//    activity (capital-bounded: it only ever holds what the owner explicitly deposited).
+//  - SubscriptionRun is an append-only audit log of every attempt, including failures — never
+//    trusted as authoritative on its own, same "log/cache, not source of truth" stance
+//    marketplace-db documents for its own escrow mirror.
+
+generator client {
+  provider = "prisma-client-js"
+  // Custom output, not the default node_modules/@prisma/client — see marketplace-db/social-db/
+  // degen-db's schema.prisma for why (pnpm dedupes identical @prisma/client versions to one
+  // shared store location; without a custom output path, whichever package last ran `generate`
+  // wins and silently overwrites the others' generated model types).
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("CUSTODY_DATABASE_URL")
+}
+
+// Duplicated from marketplace-db's/social-db's/degen-db's Chain enum on purpose — separate
+// Prisma datasource/client, so generated types can't be shared across packages. Keep in sync by
+// hand. Subscriptions are EVM-only for now (see the plan's Phase 3/4) — all five members are
+// still listed so this enum doesn't need a breaking change when Solana/Sui support is added.
+enum Chain {
+  BSC_TESTNET
+  BASE_SEPOLIA
+  ETH_SEPOLIA
+  ARC_TESTNET
+  SOLANA_DEVNET
+  SUI_TESTNET
+}
+
+enum SubscriptionFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum WalletStatus {
+  ACTIVE
+  WITHDRAWN
+  REVOKED
+}
+
+// Mirrors the on-chain job lifecycle's own ambiguity window: ATTEMPTING/SUBMITTED are written
+// *before* the transaction is confirmed, not only after, so a crash mid-flight (this process
+// holds a decrypted key while broadcasting) leaves forensic evidence a reconciliation pass can
+// resolve against chain state, instead of silent ambiguity or a blind retry.
+enum SubscriptionRunStatus {
+  PENDING
+  ATTEMPTING
+  SUBMITTED
+  SUCCEEDED
+  FAILED
+}
+
+model Subscription {
+  id                    String                @id @default(cuid())
+  chain                 Chain
+  /// The connected human wallet that created and controls this subscription — checked with
+  /// plain equality against the session in subscriptionAuth.ts (a DB row has no on-chain
+  /// identity of its own to re-derive ownership from, unlike an agent).
+  ownerAddress          String
+  hiredAgentId          String
+  taskDescription       String
+  budgetUsdc            Decimal               @db.Decimal(30, 10)
+  deadlineDays          Int                   @default(7)
+  frequency             SubscriptionFrequency
+  isActive              Boolean               @default(true)
+  /// Caps how many jobs this subscription may have open (posted, not yet confirmed/cancelled/
+  /// resolved) at once — without this, an owner who stops reviewing would let jobs pile up
+  /// indefinitely once a scheduler exists. Enforced at run time (Phase 2), stored now so the
+  /// schema doesn't need a later migration for it.
+  maxConcurrentOpenJobs Int                   @default(1)
+  nextRunAt             DateTime              @default(now())
+  /// Atomic-claim marker for the scheduler (Phase 2): a tick claims a due subscription via a
+  /// single conditional `UPDATE ... WHERE lockedUntil IS NULL OR lockedUntil < now()`, so a
+  /// supervisor restart mid-tick can't cause two scheduler processes (or an overlapping tick)
+  /// to double-fire the same subscription. Cleared after the run completes either way.
+  lockedUntil           DateTime?
+  executionCount        Int                   @default(0)
+  totalPaidUsdc         Decimal               @default(0) @db.Decimal(30, 10)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  wallet SubscriptionWallet?
+  runs   SubscriptionRun[]
+
+  @@index([ownerAddress])
+  @@index([isActive, nextRunAt])
+}
+
+// One custodied wallet per subscription (not pooled per-owner) — capital-bounded exposure
+// matching Degen's per-(agent,venue) granularity: a compromise only ever exposes one
+// subscription's deposited balance, not a shared pool across a user's whole subscription set.
+model SubscriptionWallet {
+  id                  String       @id @default(cuid())
+  subscriptionId      String       @unique
+  chain               Chain
+  address             String
+  /// Envelope-encrypted: a KMS-held root key encrypts a per-wallet data key, which encrypts
+  /// this. Never stores or logs plaintext key material. See lib/server/custody/
+  /// envelopeEncryption.ts and lib/server/subscriptions/custody.ts.
+  encryptedPrivateKey String
+  keyVersion          Int          @default(1)
+  status              WalletStatus @default(ACTIVE)
+  createdAt           DateTime     @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+}
+
+model SubscriptionRun {
+  id             String                @id @default(cuid())
+  subscriptionId String
+  status         SubscriptionRunStatus @default(PENDING)
+  /// Set once postJob is actually submitted — the on-chain job this run created.
+  jobChainId     String?
+  txHashOrRef    String?
+  error          String?
+  /// Set true once the job has been confirmed/cancelled/disputed via the relay routes — lets
+  /// the Phase 2 risk gate count "genuinely still-open" jobs (SUBMITTED but not yet resolved)
+  /// toward maxConcurrentOpenJobs, rather than every job this subscription has ever posted.
+  jobResolved    Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+}
+
+enum PipelineExecutionMode {
+  SERIAL
+  PARALLEL
+}
+
+enum PipelineStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum PipelineStepRole {
+  ORCHESTRATOR
+  WORKER
+  EVALUATOR
+}
+
+// Mirrors SubscriptionRunStatus's own reasoning exactly: ATTEMPTING/SUBMITTED are written
+// *before* postJob's transaction is confirmed, not only after, so a crash mid-flight (this
+// process holds a decrypted key while broadcasting) leaves forensic evidence a reconciliation
+// pass can check against chain state, rather than silent ambiguity or a blind retry.
+enum PipelineStepStatus {
+  PENDING
+  ATTEMPTING
+  SUBMITTED
+  COMPLETED
+  FAILED
+}
+
+// A user-authored, multi-agent workflow — chains several on-chain marketplace jobs together
+// under one custodied wallet (PipelineWallet) so later steps can be posted autonomously by the
+// indexer (see apps/indexer/src/pipelineEvents.ts) once an earlier step's job actually
+// completes on-chain, the same "server signs because the owner isn't there to" shape
+// Subscription's own scheduler uses — except triggered by a job-completion event instead of a
+// time tick, since a pipeline step has no fixed schedule to wait for, just its predecessor.
+// EVM-only for now, same "ship one chain family first" precedent Subscriptions itself set.
+model Pipeline {
+  id            String                @id @default(cuid())
+  chain         Chain
+  /// The connected human wallet that created and controls this pipeline — same plain-equality
+  /// ownership check as Subscription.ownerAddress (see orchestrationAuth.ts).
+  ownerAddress  String
+  name          String
+  description   String
+  executionMode PipelineExecutionMode
+  status        PipelineStatus        @default(DRAFT)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  wallet PipelineWallet?
+  steps  PipelineStep[]
+
+  @@index([ownerAddress])
+  @@index([status])
+}
+
+// One custodied wallet per pipeline (not pooled per-owner) — same capital-bounded-exposure
+// reasoning as SubscriptionWallet: a compromise only ever exposes one pipeline's deposited
+// balance. Uses its own root key (PIPELINE_KMS_PROVIDER/PIPELINE_LOCAL_ROOT_KEY, see
+// pipelineCustody.ts) so a compromise of one custodied-signing domain doesn't expose the others.
+model PipelineWallet {
+  id                  String       @id @default(cuid())
+  pipelineId          String       @unique
+  chain               Chain
+  encryptedPrivateKey String
+  address             String
+  keyVersion          Int          @default(1)
+  status              WalletStatus @default(ACTIVE)
+  createdAt           DateTime     @default(now())
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+}
+
+model PipelineStep {
+  id              String             @id @default(cuid())
+  pipelineId      String
+  /// Execution order within the pipeline — SERIAL mode posts position 0, then 1, etc., each
+  /// only once the previous position's job is Completed on-chain; PARALLEL mode posts every
+  /// position at once and position is purely display order.
+  position        Int
+  agentChainId    String
+  agentName       String
+  role            PipelineStepRole
+  taskDescription String
+  budgetUsdc      Decimal            @db.Decimal(30, 10)
+  deadlineDays    Int                @default(3)
+  status          PipelineStepStatus @default(PENDING)
+  /// Set once postJob is actually submitted — the on-chain job this step created.
+  jobChainId      String?
+  txHashOrRef     String?
+  error           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@index([pipelineId, position])
+  /// Looked up by the indexer's job-event handler: given a chain + on-chain jobId, find which
+  /// step (if any) it belongs to. Not unique on its own — jobChainId is only unique per chain,
+  /// and this table has no chain column of its own (see pipeline.chain) — the handler always
+  /// joins through `pipeline: { chain }` alongside this.
+  @@index([jobChainId])
+}
+
+// One custodied wallet per agent per chain — the canonical destination every earning flow
+// (job completion payout, launchpad creator allocation, x402 earnings, and Degen venue
+// settlement) redirects to, replacing the old "push straight to the human owner at settlement
+// time" behavior. Unlike SubscriptionWallet/TradingWallet (capital-bounded, scoped to one
+// subscription or one trading venue), this wallet is meant to accumulate and persist — an
+// owner claims out of it via claimAgentWallet, which resolves the destination from a *live*
+// on-chain read of the agent's current owner (see apps/web's getOnChainAgentOwner), never a
+// stored value, so claim rights follow an Agent Exchange sale automatically.
+model AgentWallet {
+  id                  String       @id @default(cuid())
+  chain               Chain
+  agentChainId        String
+  address             String
+  /// Envelope-encrypted under its own root key (AGENT_WALLET_KMS_PROVIDER/
+  /// AGENT_WALLET_LOCAL_ROOT_KEY) — deliberately separate from Subscriptions', Degen's, and the
+  /// facilitator's root keys, so a compromise of one custodied-signing domain doesn't expose
+  /// the others.
+  encryptedPrivateKey String
+  keyVersion          Int          @default(1)
+  status              WalletStatus @default(ACTIVE)
+  createdAt           DateTime     @default(now())
+
+  @@unique([chain, agentChainId])
+}
+
+enum FacilitatorWalletStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum RegistrarWalletStatus {
+  ACTIVE
+  REVOKED
+}
+
+// The indexer's privileged signer that calls ClawdHQCore.setAgentWallet once an AgentWallet has
+// been provisioned — one wallet per chain, same "never holds funds, only submits a privileged
+// write" shape as FacilitatorWallet. The chain admin must separately grant this wallet's address
+// REGISTRAR_ROLE on-chain; provisioning the row here grants no on-chain authority by itself.
+model RegistrarWallet {
+  id                  String                @id @default(cuid())
+  chain               Chain
+  address             String                @unique
+  /// Envelope-encrypted under its own root key (REGISTRAR_KMS_PROVIDER/
+  /// REGISTRAR_LOCAL_ROOT_KEY) — deliberately separate from every other domain's root key.
+  encryptedPrivateKey String
+  keyVersion          Int                   @default(1)
+  status              RegistrarWalletStatus @default(ACTIVE)
+  createdAt           DateTime              @default(now())
+}
+
+// A Circle developer-controlled wallet (packages/circle/src/wallets.ts) — the owner-facing
+// counterpart to every *Wallet model above. Those all hold an `encryptedPrivateKey` this app
+// decrypts to sign; this one holds no key material at all, because Circle custodies the key
+// itself and signs server-side on request. `walletId`/`walletSetId` are just references into
+// Circle's own system, not secrets — safe to store in plaintext.
+model CircleOwnerWallet {
+  id           String   @id @default(cuid())
+  ownerAddress String
+  chain        Chain    @default(ARC_TESTNET)
+  walletSetId  String
+  walletId     String
+  address      String
+  createdAt    DateTime @default(now())
+
+  @@unique([ownerAddress, chain])
+}
+
+enum PaymentPullStatus {
+  SUCCEEDED
+  FAILED
+}
+
+// x402 facilitator: a custodied EVM key authorized (via ERC-20 `approve`) by a payer to pull
+// metered per-call payments on their behalf, gated by an on-chain idempotency-key check (see
+// X402Facilitator.sol) rather than trusting this table alone to prevent a double-pull — this
+// table is the audit ledger and rate-limit source, not the sole double-spend guard.
+model FacilitatorWallet {
+  id                  String                  @id @default(cuid())
+  chain               Chain
+  address             String                  @unique
+  /// Envelope-encrypted under its own root key (FACILITATOR_KMS_PROVIDER/
+  /// FACILITATOR_LOCAL_ROOT_KEY) — deliberately separate from Subscriptions' and Degen's root
+  /// keys, so a compromise of one custodied-signing domain doesn't expose the others.
+  encryptedPrivateKey String
+  keyVersion          Int                     @default(1)
+  status              FacilitatorWalletStatus @default(ACTIVE)
+  createdAt           DateTime                @default(now())
+}
+
+model PaymentPull {
+  id               String            @id @default(cuid())
+  chain            Chain
+  payerAddress     String
+  recipientAddress String
+  amountUsdc       Decimal           @db.Decimal(30, 10)
+  /// Caller-supplied idempotency key (also checked on-chain by X402Facilitator.sol) — a retried
+  /// request with the same key returns the original result instead of double-pulling, same
+  /// pattern as TradingOrder.clientOrderId in degen-db.
+  idempotencyKey   String            @unique
+  status           PaymentPullStatus
+  txHashOrRef      String?
+  error            String?
+  createdAt        DateTime          @default(now())
+
+  @@index([payerAddress, createdAt])
+}
+
+// --- Hosted agent runtime ---------------------------------------------------------------
+// Everything below supports agents ClawdHQ itself runs (packages/hosted-agent-runtime), as an
+// alternative to the bring-your-own-endpoint model every agent used until now. Deliberately
+// kept in this schema, not marketplace-db/social-db: a scheduler reading HostedRuntimeConfig
+// and deciding to sign+broadcast from an AgentWallet, or a route decrypting AgentLlmKey to call
+// an LLM on the owner's behalf, is exactly the "reads a row here and decides to act with
+// custodied authority" shape this schema's header already describes.
+
+// Two different routing paths use this enum (see packages/hosted-agent-runtime/src/llmClient.ts):
+// a BYO_KEY agent's key is provider-specific (ANTHROPIC/OPENAI/GEMINI — the owner's own account
+// with that provider, called directly), while a PLATFORM-billed agent always routes through
+// OPENROUTER on a single ClawdHQ-held key, since platform billing needs to serve whatever
+// Foundation Model an owner picked (including ones ClawdHQ doesn't hold a direct provider key
+// for, e.g. Llama/DeepSeek/Qwen) without provisioning a key for every provider it might need.
+enum LlmProvider {
+  ANTHROPIC
+  OPENAI
+  GEMINI
+  OPENROUTER
+}
+
+// BYO LLM provider key for a hosted-runtime agent. Not "custodied funds" in the strict sense,
+// but still secret material this app decrypts to act on an owner's behalf server-side — same
+// shape as every other secret in this file, so it lives here rather than quietly starting a
+// third schema that holds keys. Own root key (LLM_KEY_KMS_PROVIDER/LLM_KEY_LOCAL_ROOT_KEY),
+// isolated from every wallet domain's root key for the same reason those are isolated from each
+// other.
+model AgentLlmKey {
+  id              String       @id @default(cuid())
+  chain           Chain
+  agentChainId    String
+  provider        LlmProvider
+  encryptedApiKey String
+  keyVersion      Int          @default(1)
+  status          WalletStatus @default(ACTIVE)
+  createdAt       DateTime     @default(now())
+
+  @@unique([chain, agentChainId])
+}
+
+enum RuntimeMode {
+  HOSTED
+  BYO_ENDPOINT
+}
+
+enum LlmBilling {
+  PLATFORM
+  BYO_KEY
+}
+
+// One row per agent that has opted into (or out of) the hosted runtime. `mode` is technically
+// inferable from whether a row exists at all, but kept explicit rather than implied so a future
+// partial-hosted option for BYO_ENDPOINT agents doesn't require re-deriving intent from
+// row-presence alone. `nextTickAt`/`lockedUntil` copy Subscription's atomic-claim shape verbatim
+// — this is the row the new scheduler (apps/indexer/src/hostedRuntimeScheduler.ts) claims via a
+// conditional UPDATE, same reasoning as Subscription's own fields document.
+model HostedRuntimeConfig {
+  id                 String      @id @default(cuid())
+  chain              Chain
+  agentChainId       String
+  mode               RuntimeMode @default(HOSTED)
+  llmBilling         LlmBilling  @default(PLATFORM)
+  isActive           Boolean     @default(false)
+  /// The inbound x402 price for one reactive reply (see agentX402.ts) — 0 means free, matching
+  /// the pre-x402 default behavior. Independent of the on-chain `supportsX402` flag: that flag
+  /// is what *other* callers check before assuming an agent might request payment (same role
+  /// `supportsA2A` already plays in agentA2aLookup.ts); this field is this agent's own actual
+  /// price, which only matters to this route's own challenge/verify logic.
+  x402ReplyPriceUsdc Decimal     @default(0) @db.Decimal(30, 10)
+  nextTickAt         DateTime    @default(now())
+  lockedUntil        DateTime?
+  lastTickAt         DateTime?
+  executionCount     Int         @default(0)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@unique([chain, agentChainId])
+  @@index([isActive, nextTickAt])
+}
+
+// Replay guard for the reactive .../a2a route's x402 challenge (see agentX402.ts): a caller's
+// X-PAYMENT header proves a specific facilitator pull (identified by PaymentPull.idempotencyKey)
+// happened, but that pull is a one-time event on its own — without this table, the same
+// already-spent idempotencyKey could be replayed in the X-PAYMENT header on every future request
+// to unlock unlimited replies from a single payment. One row per successfully-redeemed payment;
+// a second attempt with the same idempotencyKey is rejected before ever reaching the LLM.
+model AgentX402Redemption {
+  idempotencyKey String   @id
+  chain          Chain
+  agentChainId   String
+  createdAt      DateTime @default(now())
+
+  @@index([chain, agentChainId])
+}
+
+// The fixed, enumerable set of actions a hosted runtime may take that move money — deliberately
+// small and explicit rather than open-ended, so AgentSpendPolicy.allowedActions can gate by
+// value instead of free text.
+enum SpendAction {
+  POST_JOB
+  X402_PAYMENT
+  /// Invoking a priced entry from packages/hosted-agent-runtime's SKILL_INVOCATIONS registry —
+  /// see agentSkillActions.ts's callAgentSkill.
+  CALL_SKILL
+  /// Paying to resolve a published KnowledgeContribution (social-db) — see
+  /// knowledgeResolveClient.ts's resolveKnowledgeContribution. Unlike CALL_SKILL, this one *does*
+  /// result in real PaymentPull rows (see KnowledgeUsage below), not just a metered/logged cost.
+  USE_KNOWLEDGE
+  /// A real on-chain swap of the AgentWallet's own USDC for WETH via Uniswap V3 — see
+  /// custody-core's uniswapSwap.ts. Unlike CALL_SKILL, the amountUsdc checked against
+  /// dailyCapUsdc here *is* the real value moved (the swap's own input amount), not a flat
+  /// metering fee — this is the one SpendAction that actually signs and broadcasts a
+  /// value-moving transaction built from a live third-party quote rather than a fixed platform
+  /// price.
+  SWAP
+}
+
+// Owner-set authorization bounding what a hosted runtime may autonomously spend from the
+// agent's existing AgentWallet — not a new key domain, just a policy gating how much of that
+// wallet's existing signing authority a backend process is allowed to exercise unattended.
+// `isEnabled` is kept separate from `dailyCapUsdc` so revocation is a single unambiguous flip
+// (an audit trail reading "isEnabled: false" is clearer than inferring revocation from a cap of
+// zero, which could also just mean "temporarily out of budget").
+model AgentSpendPolicy {
+  id             String        @id @default(cuid())
+  chain          Chain
+  agentChainId   String
+  dailyCapUsdc   Decimal       @default(0) @db.Decimal(30, 10)
+  allowedActions SpendAction[]
+  isEnabled      Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  spendLogs AgentSpendLog[]
+
+  @@unique([chain, agentChainId])
+}
+
+// Mirrors SubscriptionRunStatus's own reasoning exactly: ATTEMPTING/SUBMITTED are written
+// *before* the transaction is confirmed so a crash mid-flight (this process holding a decrypted
+// AgentWallet key while broadcasting) leaves forensic evidence, not silent ambiguity.
+enum AgentSpendStatus {
+  PENDING
+  ATTEMPTING
+  SUBMITTED
+  SUCCEEDED
+  FAILED
+}
+
+// Append-only audit ledger of every spend attempt — the source `checkAgentSpendPolicy` sums
+// against for the rolling daily-cap check, and what an owner reviews to see what their hosted
+// agent has done with its spend authority.
+model AgentSpendLog {
+  id                 String           @id @default(cuid())
+  agentSpendPolicyId String
+  action             SpendAction
+  amountUsdc         Decimal          @db.Decimal(30, 10)
+  /// e.g. the jobChainId a POST_JOB created, or the recipient address for an X402_PAYMENT.
+  targetRef          String?
+  status             AgentSpendStatus @default(PENDING)
+  txHashOrRef        String?
+  error              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  policy AgentSpendPolicy @relation(fields: [agentSpendPolicyId], references: [id], onDelete: Cascade)
+
+  @@index([agentSpendPolicyId, createdAt])
+}
+
+// --- Platform LLM billing ----------------------------------------------------------------
+// Modeled on Virtuals Protocol's own inference-payment shape (see the whitepaper's "Agent
+// Inference Payments" page): a predetermined, per-inference cost deducted from a balance the
+// agent pre-loaded, on-chain. The literal on-chain-per-call part doesn't translate here — a
+// chain write per LLM call would make every reply take multiple seconds and cost more in gas
+// than the inference itself — so the ledger below is off-chain (same "audit ledger, not
+// consensus" role AgentSpendLog/PaymentPull already play), but funding it is still a real
+// on-chain transfer (see topUpAgentLlmCredit in custody-core), not an admin-settable number: the
+// balance can never represent value that isn't actually sitting in LlmBillingTreasuryWallet.
+
+enum LlmBillingTreasuryWalletStatus {
+  ACTIVE
+  REVOKED
+}
+
+// Where top-up transfers land — one custodied wallet per chain, same "never holds funds it
+// doesn't immediately need to, only submits a privileged write" shape as FacilitatorWallet,
+// except this one *does* accumulate (every agent's LLM top-ups pool here, spent down over time
+// as platform LLM costs). Its own root key (LLM_BILLING_TREASURY_KMS_PROVIDER/
+// LLM_BILLING_TREASURY_LOCAL_ROOT_KEY), isolated from every other custody domain for the usual
+// reason.
+model LlmBillingTreasuryWallet {
+  id                  String                         @id @default(cuid())
+  chain               Chain
+  address             String                         @unique
+  encryptedPrivateKey String
+  keyVersion          Int                            @default(1)
+  status              LlmBillingTreasuryWalletStatus @default(ACTIVE)
+  createdAt           DateTime                       @default(now())
+}
+
+// A hosted agent's prepaid LLM balance for PLATFORM billing — the thing chargeAgentLlmCredit
+// decrements per call and topUpAgentLlmCredit increments after a real on-chain transfer from the
+// agent's own AgentWallet to LlmBillingTreasuryWallet confirms. BYO_KEY-billed agents never get a
+// row here; their calls aren't metered by ClawdHQ at all.
+model AgentLlmCredit {
+  id           String   @id @default(cuid())
+  chain        Chain
+  agentChainId String
+  balanceUsdc  Decimal  @default(0) @db.Decimal(30, 10)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([chain, agentChainId])
+}
+
+// Which of the hosted runtime's two LLM call sites a charge came from — llmClient.ts's
+// generateAgentReply (reactive, one per inbound message) and decideAgentAction (the scheduled
+// tick's proactive decision). Priced separately (see PLATFORM_COST_PER_*_CALL_USDC in
+// agentLlmCredit.ts) since a tick's structured-output decision call is typically cheaper than a
+// full conversational reply.
+enum LlmCallKind {
+  REACTIVE_REPLY
+  TICK_DECISION
+}
+
+// Append-only per-call debit log — both the audit trail an owner reviews and the thing a
+// reconciliation pass could check AgentLlmCredit.balanceUsdc against. Unlike AgentSpendLog, a
+// charge here is never "pending/attempting" — chargeAgentLlmCredit only ever writes a row after
+// the LLM call has already completed successfully, since there's nothing to roll back (no
+// on-chain transaction per charge, just a balance decrement).
+model AgentLlmUsage {
+  id           String      @id @default(cuid())
+  chain        Chain
+  agentChainId String
+  callKind     LlmCallKind
+  provider     LlmProvider
+  inputTokens  Int         @default(0)
+  outputTokens Int         @default(0)
+  costUsdc     Decimal     @db.Decimal(30, 10)
+  createdAt    DateTime    @default(now())
+
+  @@index([chain, agentChainId, createdAt])
+}
+
+// --- Knowledge marketplace ---------------------------------------------------------------
+// The real usage/earnings ledger for social-db's KnowledgeContribution — belongs here, not
+// social-db, for the same reason PaymentPull/AgentSpendLog do: this is money that actually moved,
+// not descriptive content. No DB-level FK to social-db (separate Prisma datasource/client, same
+// as every other cross-schema reference in this file) — contributionId/ownerProfileId are
+// app-level references only.
+
+/// One row per successful knowledge-contribution resolve — written once both legs of the 50/50
+/// split land (see knowledgeX402.ts's verifyKnowledgeX402Payment), and itself the replay guard:
+/// ownerPullId/protocolPullId are unique, so a given PaymentPull can back at most one usage row.
+/// No intermediate treasury wallet or batch settlement job: both PaymentPull rows this references
+/// already moved funds straight to their final destination (owner's own wallet, and the plain
+/// KNOWLEDGE_PROTOCOL_FEE_ADDRESS-configured address) at resolve time — see FacilitatorWallet's
+/// own doc comment on why a pull recipient never needs private-key custody here.
+model KnowledgeUsage {
+  id                   String   @id @default(cuid())
+  contributionId       String
+  ownerProfileId       String
+  ownerPayoutAddress   String
+  consumerChain        Chain
+  /// The address that actually paid the owner-leg PaymentPull — always present, since the resolve
+  /// route is a genuinely public paid resource (any x402-capable caller, not only ClawdHQ's own
+  /// hosted agents). `consumerAgentChainId` is a best-effort reverse lookup against AgentWallet
+  /// for that address and null for an external payer this app doesn't custody.
+  consumerPayerAddress String
+  consumerAgentChainId String?
+  priceUsdc            Decimal  @db.Decimal(30, 10)
+  ownerShareUsdc       Decimal  @db.Decimal(30, 10)
+  protocolShareUsdc    Decimal  @db.Decimal(30, 10)
+  ownerPullId          String   @unique
+  protocolPullId       String   @unique
+  createdAt            DateTime @default(now())
+
+  @@index([contributionId])
+  @@index([ownerProfileId, createdAt])
+}

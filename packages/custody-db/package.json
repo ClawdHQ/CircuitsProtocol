@@ -1,0 +1,37 @@
+{
+  "name": "@clawdhq/custody-db",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared Prisma schema/client for non-trading server-custodied signing keys (Subscriptions' per-subscription wallets now, the x402 facilitator later) — isolated from marketplace-db, social-db, and degen-db because it's another schema that holds encrypted private key material, same reasoning degen-db's own isolation documents",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "prisma generate && tsup && rm -rf dist/generated && cp -R src/generated dist/generated && tsc --emitDeclarationOnly -p tsconfig.json",
+    "dev": "tsup --watch",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "test": "echo \"no unit tests — this package is schema + a generated client\"",
+    "lint": "eslint src",
+    "clean": "rm -rf dist",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.1.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3"
+  }
+}
