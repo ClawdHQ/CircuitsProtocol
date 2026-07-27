@@ -17,6 +17,11 @@
       "types": "./dist/skillCatalog.d.ts",
       "import": "./dist/skillCatalog.js",
       "require": "./dist/skillCatalog.cjs"
+    },
+    "./llm-model-catalog": {
+      "types": "./dist/llmModelCatalog.d.ts",
+      "import": "./dist/llmModelCatalog.js",
+      "require": "./dist/llmModelCatalog.cjs"
     }
   },
   "scripts": {
@@ -28,6 +33,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@clawdhq/circle": "workspace:*",
     "@clawdhq/custody-db": "workspace:*",
     "@clawdhq/sdk": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",

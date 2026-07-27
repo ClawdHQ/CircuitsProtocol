@@ -172,6 +172,7 @@ model CognitiveLayer {
   chain              Chain
   agentChainId       String
   displayName        String?
+  avatarUrl          String?
   personality        String[]
   knowledgeDomains   String[]
   communicationStyle CommunicationStyle @default(TECHNICAL)
@@ -271,6 +272,17 @@ model PublishedSkill {
   /// Set alongside endpointUrl, never independently — the timestamp of the live reachability
   /// check every endpoint-bearing publish passes before the row is created.
   verifiedAt   DateTime?
+  /// Spam-prevention listing fee — null only when SKILL_LISTING_FEE_USDC is unset/zero (fee
+  /// disabled), same "0 means free" convention as the on-chain registrationFee/launchFee.
+  /// feeChain is the chain feeTxHash was paid on (a human publisher's wallet is the same
+  /// address across every EVM chain this app supports, so any of them is valid — whichever the
+  /// publisher's client happened to be connected to at publish time). See
+  /// /api/skills/published/route.ts's verifyUsdcTransfer call.
+  feeChain     Chain?
+  /// The on-chain USDC transfer that paid the listing fee — server-verified (see
+  /// listingFeeVerify.ts) before this row is ever created. @unique (nulls excluded from the
+  /// constraint by Postgres) so the same payment can't back two different publishes.
+  feeTxHash    String?            @unique
   createdAt    DateTime           @default(now())
 
   @@index([cat])

@@ -88,6 +88,46 @@ model Bid {
   @@index([listingDbId])
 }
 
+/// Off-chain read cache of ClawdHQCore's on-chain AgentCard — same "never the source of truth,
+/// indexer mirrors chain state" relationship as Listing/GovernanceProposal above. Before this
+/// model existed, apps/web read agent data live from RPC on every page load (see
+/// useRankings/usePortfolio/useMyAgents), which routinely hit Arc Testnet's public RPC's
+/// aggressive rate limit (1 request/second) and silently rendered as "no agents" / "0
+/// contributor points" even when registration had already succeeded on-chain.
+model Agent {
+  id            String    @id @default(cuid())
+  chain         Chain
+  /// The on-chain agentId: a uint256 (as a decimal string), 1-indexed, sequential per chain.
+  agentChainId  String
+  owner         String
+  name          String
+  agentUri      String
+  endpoint      String
+  metadataHash  String
+  supportsX402  Boolean
+  supportsA2A   Boolean
+  supportsMcp   Boolean
+  active        Boolean
+  tier          Int
+  jobsCompleted Int
+  jobsFailed    Int
+  /// USDC, 6 decimals — same micros-bigint convention as Listing.fairValueSnapshotUsdc.
+  usdcRevenue   BigInt
+  reputationBps Int
+  /// Null if the agent has never completed a job (on-chain lastJobAt reads 0), same "0 means
+  /// none" convention as Listing.endTime.
+  lastJobAtChain DateTime?
+  createdAtChain DateTime
+  updatedAtChain DateTime
+  /// Last block this row was updated from — informational only, not used for cursor resume
+  /// (see IndexerCursor for that), same convention as Listing.lastIndexedAt.
+  lastIndexedAt  BigInt?
+
+  @@unique([chain, agentChainId])
+  @@index([chain, owner])
+  @@index([chain, active])
+}
+
 /// Cached copy of @clawdhq/valuation's computeFairValue() output per agent, refreshed by
 /// the indexer on revenue-changing events. Purely a read-optimization: API routes fall back
 /// to computing this live from chain state if no row exists yet, so nothing depends on the
@@ -153,6 +193,12 @@ model ServiceListing {
   priceUsdcMicros BigInt
   status          ServiceListingStatus @default(ACTIVE)
   callCount       Int                  @default(0)
+  /// Spam-prevention listing fee — the on-chain USDC transfer (on `chain`, same field above)
+  /// that paid it. Null only when SERVICE_LISTING_FEE_USDC is unset/zero (fee disabled), same
+  /// "0 means free" convention as the on-chain registrationFee/launchFee. Server-verified (see
+  /// listingFeeVerify.ts) before this row is ever created; @unique (nulls excluded from the
+  /// constraint by Postgres) so the same payment can't back two different listings.
+  feeTxHash       String?              @unique
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
@@ -360,4 +406,19 @@ model LaunchTrade {
   @@unique([chain, txHash, logIndex])
   @@index([traderAddress])
   @@index([chain, launchChainId])
+}
+
+/// Tracks the highest $1,000 cumulative-usdcRaised bracket already announced to ClawdHQ for a
+/// given launch (see apps/indexer's syncLaunchMilestone) — usdcRaised itself always comes from a
+/// fresh on-chain read of ClawdHQLaunchpad.sol's `launches()` getter, never reconstructed from
+/// LaunchTrade rows, so this table only needs to remember "the last bracket we already posted,"
+/// the same "no Launch-state model exists yet" gap LaunchTrade's own doc comment mentions.
+model LaunchMilestone {
+  id                String   @id @default(cuid())
+  chain             Chain
+  launchChainId     String
+  lastMilestoneUsdc BigInt
+  updatedAt         DateTime @updatedAt
+
+  @@unique([chain, launchChainId])
 }

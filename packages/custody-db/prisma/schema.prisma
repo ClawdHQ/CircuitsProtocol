@@ -250,6 +250,18 @@ model PipelineStep {
   @@index([jobChainId])
 }
 
+enum AgentWalletCustodyType {
+  /// A raw keypair this app generates and envelope-encrypts itself (the original, and still
+  /// default, behavior) — see agentWalletCustody.ts's provisionAgentWallet.
+  LOCAL
+  /// A pre-existing Circle Developer-Controlled Wallet ("Circle Agent Wallet",
+  /// https://developers.circle.com/agent-stack/agent-wallets) the owner already controlled
+  /// before onboarding it here — see circleAgentSignerProvider.ts. No private key ever exists
+  /// in this app for a CIRCLE-custodied row; encryptedPrivateKey is null and signing instead
+  /// goes through the linked CircleAgentWalletCredential.
+  CIRCLE
+}
+
 // One custodied wallet per agent per chain — the canonical destination every earning flow
 // (job completion payout, launchpad creator allocation, x402 earnings, and Degen venue
 // settlement) redirects to, replacing the old "push straight to the human owner at settlement
@@ -258,21 +270,84 @@ model PipelineStep {
 // owner claims out of it via claimAgentWallet, which resolves the destination from a *live*
 // on-chain read of the agent's current owner (see apps/web's getOnChainAgentOwner), never a
 // stored value, so claim rights follow an Agent Exchange sale automatically.
+//
+// custodyType is chosen once, at provisioning time, and never flips in place after — see
+// AgentWalletRegistry.sol's setAgentWallet, which is one-time-settable on-chain (reverts
+// WalletAlreadySet on a second call, "a stable, permanent identity for the agent, not
+// reassignable after the fact"). A CIRCLE row can therefore only ever come from
+// PendingCircleAgentWalletIntent being consumed *before* the agent's first on-chain binding,
+// never as a later swap for an agent that already has a LOCAL wallet bound.
 model AgentWallet {
-  id                  String       @id @default(cuid())
+  id                  String                 @id @default(cuid())
   chain               Chain
   agentChainId        String
   address             String
+  custodyType         AgentWalletCustodyType @default(LOCAL)
   /// Envelope-encrypted under its own root key (AGENT_WALLET_KMS_PROVIDER/
   /// AGENT_WALLET_LOCAL_ROOT_KEY) — deliberately separate from Subscriptions', Degen's, and the
   /// facilitator's root keys, so a compromise of one custodied-signing domain doesn't expose
-  /// the others.
-  encryptedPrivateKey String
-  keyVersion          Int          @default(1)
-  status              WalletStatus @default(ACTIVE)
-  createdAt           DateTime     @default(now())
+  /// the others. Only set when custodyType is LOCAL.
+  encryptedPrivateKey String?
+  keyVersion          Int                    @default(1)
+  /// Circle's own wallet id (not the address) — only set when custodyType is CIRCLE; what
+  /// agentEvmSigner.ts passes as `walletId` to Circle's contract-execution API.
+  circleWalletId      String?
+  circleCredentialId  String?
+  circleCredential    CircleAgentWalletCredential? @relation(fields: [circleCredentialId], references: [id])
+  status              WalletStatus           @default(ACTIVE)
+  createdAt           DateTime               @default(now())
 
   @@unique([chain, agentChainId])
+}
+
+// A human owner's own Circle developer-account credentials, supplied when onboarding a
+// pre-existing Circle Agent Wallet instead of using an auto-provisioned AgentWallet. Unlike
+// every *Wallet model above, the secret here isn't scoped to one wallet: Circle's
+// Developer-Controlled Wallets API authorizes at the account level (an entity secret can sign
+// for *every* wallet under that Circle entity, confirmed against Circle's own API reference —
+// there is no wallet-scoped or wallet-set-scoped credential in this product), so onboarding one
+// agent this way grants this app sign authority over the owner's whole Circle account, not just
+// the one wallet being onboarded. The onboarding flow tells owners to use a Circle account
+// dedicated to what they bring to ClawdHQ for exactly this reason — this app has no way to
+// technically enforce that narrower scope itself. One row per owner (not per agent), so a
+// second onboarded agent under the same Circle account doesn't need the secret re-entered.
+model CircleAgentWalletCredential {
+  id                    String   @id @default(cuid())
+  ownerAddress          String   @unique
+  /// Envelope-encrypted under its own root key (AGENT_CIRCLE_CREDENTIAL_KMS_PROVIDER/
+  /// AGENT_CIRCLE_CREDENTIAL_LOCAL_ROOT_KEY) — isolated from every other custody domain's root
+  /// key, same reasoning as every sibling model in this file.
+  encryptedApiKey       String
+  encryptedEntitySecret String
+  keyVersion            Int      @default(1)
+  createdAt             DateTime @default(now())
+
+  agentWallets AgentWallet[]
+}
+
+// Bridges the gap between "owner supplies a Circle wallet during the Register Agent wizard" and
+// "the indexer sees AgentRegistered and provisions a wallet" — the wizard's on-chain
+// registerAgent call carries no room for this app's own metadata, and the agent's real
+// on-chain-assigned id isn't known until that event arrives, so this app can't attach the intent
+// directly to an AgentWallet row up front. Keyed by (chain, ownerAddress) rather than a guessed
+// next-agent-id (the same "guess totalX + 1" tradeoff postJobFromAgentWallet/createLaunch
+// already accept elsewhere in this codebase would be needlessly fragile here, since nothing
+// forces the wizard's registerAgent call to land before another agent registers on the same
+// chain) — see evm.ts's AgentRegistered handler, which looks up a live (unconsumed, unexpired)
+// row for the event's (chain, owner) *before* falling through to its existing
+// provisionAgentWallet auto-provisioning. expiresAt bounds how long a filled-in-but-abandoned
+// wizard step can affect a *later, unrelated* registration by the same owner.
+model PendingCircleAgentWalletIntent {
+  id                 String    @id @default(cuid())
+  chain              Chain
+  ownerAddress       String
+  circleWalletId     String
+  circleCredentialId String
+  createdAt          DateTime  @default(now())
+  expiresAt          DateTime
+  consumedAt         DateTime?
+
+  @@unique([chain, ownerAddress])
 }
 
 enum FacilitatorWalletStatus {
@@ -392,6 +467,28 @@ model AgentLlmKey {
   provider        LlmProvider
   encryptedApiKey String
   keyVersion      Int          @default(1)
+  status          WalletStatus @default(ACTIVE)
+  createdAt       DateTime     @default(now())
+
+  @@unique([chain, agentChainId])
+}
+
+// One row per agent that's been registered on ClawdHQ (https://clawdhq.xyz), a genuinely
+// separate AI-agent social platform with its own database and its own Circle credentials —
+// see clawdhqClient.ts's doc comment. clawdhqAgentId/handle are ClawdHQ's own identifiers,
+// not secret; encryptedApiKey is the bearer token ClawdHQ issued for posting as this agent,
+// so it gets the same envelope-encryption treatment as every other secret in this package.
+// walletLinked tracks whether POST /agents/wallet has succeeded yet — registration doesn't
+// block on it (ClawdHQ's own API explicitly supports attaching a wallet later), so a fresh
+// connect can be false here until a retry links it.
+model ClawdHqLink {
+  id              String       @id @default(cuid())
+  chain           Chain
+  agentChainId    String
+  clawdhqAgentId  String
+  handle          String
+  encryptedApiKey String
+  walletLinked    Boolean      @default(false)
   status          WalletStatus @default(ACTIVE)
   createdAt       DateTime     @default(now())
 

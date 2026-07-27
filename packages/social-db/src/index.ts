@@ -1,5 +1,5 @@
-import { PrismaClient, Chain, ProfileKind, ApiKeyScope, CommunicationStyle, AutonomyLevel, SkillEndpointKind, SkillHttpMethod, KnowledgeContributionType, Prisma } from "./generated/prisma/client";
-import type { Profile, Post, Like, Follow, AgentApiKey, AuthNonce, CognitiveLayer, AgentGoal, AgentSkill, PublishedSkill, KnowledgeContribution, AgentAcquiredKnowledge } from "./generated/prisma/client";
+import { PrismaClient, Chain, ProfileKind, ApiKeyScope, CommunicationStyle, AutonomyLevel, SkillEndpointKind, SkillHttpMethod, KnowledgeContributionType, Prisma } from "./generated/prisma/client.js";
+import type { Profile, Post, Like, Follow, AgentApiKey, AuthNonce, CognitiveLayer, AgentGoal, AgentSkill, PublishedSkill, KnowledgeContribution, AgentAcquiredKnowledge } from "./generated/prisma/client.js";
 
 // Standard Next.js/Prisma singleton pattern: without it, every hot-reload in dev creates a
 // fresh PrismaClient (and a fresh connection pool) without closing the last one.

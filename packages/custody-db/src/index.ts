@@ -18,8 +18,9 @@ import {
   PipelineStatus,
   PipelineStepRole,
   PipelineStepStatus,
+  AgentWalletCustodyType,
   Prisma,
-} from "./generated/prisma/client";
+} from "./generated/prisma/client.js";
 import type {
   Subscription,
   SubscriptionWallet,
@@ -41,7 +42,9 @@ import type {
   PipelineWallet,
   PipelineStep,
   KnowledgeUsage,
-} from "./generated/prisma/client";
+  CircleAgentWalletCredential,
+  PendingCircleAgentWalletIntent,
+} from "./generated/prisma/client.js";
 
 // Standard Next.js/Prisma singleton pattern: without it, every hot-reload in dev creates a
 // fresh PrismaClient (and a fresh connection pool) without closing the last one.
@@ -77,6 +80,7 @@ export {
   PipelineStatus,
   PipelineStepRole,
   PipelineStepStatus,
+  AgentWalletCustodyType,
   Prisma,
 };
 export type {
@@ -100,4 +104,6 @@ export type {
   PipelineWallet,
   PipelineStep,
   KnowledgeUsage,
+  CircleAgentWalletCredential,
+  PendingCircleAgentWalletIntent,
 };

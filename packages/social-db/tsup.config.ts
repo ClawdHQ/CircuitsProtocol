@@ -15,5 +15,5 @@ export default defineConfig({
   // bundle: it ships a native query-engine binary that must stay a real file on disk, not
   // get inlined into a single JS bundle. package.json's build script copies
   // src/generated -> dist/generated so this reference still resolves at runtime.
-  external: ["@prisma/client", "./generated/prisma/client"],
+  external: ["@prisma/client", "./generated/prisma/client.js"],
 });
