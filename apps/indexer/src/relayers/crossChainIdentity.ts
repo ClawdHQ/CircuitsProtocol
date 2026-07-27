@@ -171,7 +171,7 @@ export async function processPendingRelays(configs: EvmChainIndexerConfig[]): Pr
 
 /// Runs forever, calling processPendingRelays on an interval. Returns (rather than looping)
 /// without doing anything if the relayer isn't configured — matches main.ts's "skip whatever
-/// chain isn't configured" convention.
+/// isn't configured" convention for Solana/Sui.
 export async function runCrossChainIdentityRelayer(configs: EvmChainIndexerConfig[]): Promise<void> {
   if (!CIRCLE_IRIS_API_URL || !RELAYER_PRIVATE_KEY) {
     console.log("[relayer:crossChainIdentity] RELAYER_PRIVATE_KEY or CIRCLE_IRIS_API_URL not set — relayer disabled.");

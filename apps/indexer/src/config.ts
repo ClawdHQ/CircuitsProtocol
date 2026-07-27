@@ -88,6 +88,52 @@ export function loadAllEvmChainConfigs(): EvmChainIndexerConfig[] {
     .filter((config): config is EvmChainIndexerConfig => config !== undefined);
 }
 
+export interface SolanaIndexerConfig {
+  prismaChain: Chain;
+  rpcUrl: string;
+  programId: string;
+  usdcMint: string;
+  treasuryAddress?: string;
+}
+
+/** Same "return undefined if not fully configured" convention as the EVM loader — lets the
+ * indexer run against whichever subset of chains is actually deployed. Deliberately reads the
+ * bare `SOLANA_DEVNET_*` vars, not the `NEXT_PUBLIC_*` ones apps/web uses: the indexer is a
+ * plain Node process (no bundling/exposure concerns), and keeping the two separate lets it
+ * point at a different, heavier-traffic-tolerant RPC endpoint than the one shipped to browsers. */
+export function loadSolanaChainConfig(): SolanaIndexerConfig | undefined {
+  const rpcUrl = process.env.SOLANA_DEVNET_RPC_URL;
+  const programId = process.env.SOLANA_DEVNET_PROGRAM_ID;
+  const usdcMint = process.env.SOLANA_DEVNET_USDC_MINT;
+  if (!rpcUrl || !programId || !usdcMint) return undefined;
+
+  return {
+    prismaChain: Chain.SOLANA_DEVNET,
+    rpcUrl,
+    programId,
+    usdcMint,
+    treasuryAddress: process.env.SOLANA_DEVNET_TREASURY_ADDRESS || undefined,
+  };
+}
+
+export interface SuiIndexerConfig {
+  prismaChain: Chain;
+  rpcUrl: string;
+  packageId: string;
+  protocolStateId: string;
+  usdcCoinType: string;
+}
+
+export function loadSuiChainConfig(): SuiIndexerConfig | undefined {
+  const rpcUrl = process.env.SUI_TESTNET_RPC_URL;
+  const packageId = process.env.SUI_TESTNET_PACKAGE_ID;
+  const protocolStateId = process.env.SUI_TESTNET_REGISTRY_OBJECT_ID;
+  const usdcCoinType = process.env.SUI_TESTNET_USDC_TYPE;
+  if (!rpcUrl || !packageId || !protocolStateId || !usdcCoinType) return undefined;
+
+  return { prismaChain: Chain.SUI_TESTNET, rpcUrl, packageId, protocolStateId, usdcCoinType };
+}
+
 export const POLL_INTERVAL_MS = Number(process.env.INDEXER_POLL_INTERVAL_MS ?? 5_000);
 /** Some RPC providers cap how large a block range a single getLogs call may cover. */
 export const LOG_BATCH_BLOCKS = BigInt(process.env.INDEXER_LOG_BATCH_BLOCKS ?? 2_000);
