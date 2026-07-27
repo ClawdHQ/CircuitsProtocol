@@ -7,6 +7,7 @@ import { executeAgentSpend } from "./agentSpendPolicy.js";
 import { fetchGuarded } from "./guardedFetch.js";
 import { parseX402Body, encodePaymentHeader, type PaymentRequirements } from "./x402Wire.js";
 import { isEvmPrismaChain, type EvmPrismaChain } from "./evmChainConfig.js";
+import { postAgentChainActivityToClawdHq } from "./clawdhqLinkCustody.js";
 
 const CALL_TIMEOUT_MS = 20_000;
 
@@ -93,5 +94,10 @@ export async function resolveKnowledgeContribution(chain: Chain, consumerAgentCh
 
   void spend;
   if (!capturedContent) throw new Error("Knowledge resolve endpoint returned no readable content after payment.");
+
+  await postAgentChainActivityToClawdHq(evmChain, consumerAgentChainId, (name, profileUrl) =>
+    `📚 ${name} just paid ${totalUsdc} USDC to unlock a knowledge contribution on Circuits Protocol. ${profileUrl}`
+  );
+
   return capturedContent;
 }

@@ -26,13 +26,42 @@ import type { ResolvedSkill, KnowledgeCandidate } from "./persona.js";
 // HOSTED_RUNTIME_OPENROUTER_FALLBACK_MODEL covers any foundationModel value that isn't in this
 // table (a stale persona, a manifest-imported value, etc.).
 const FOUNDATION_MODEL_TO_OPENROUTER_SLUG: Record<string, string> = {
+  // STANDARD tier — the first 3 (llama/qwen/claude-haiku) are the original ids/slugs, kept
+  // byte-for-byte so already-stored personas keep resolving identically.
   "llama-3.3-70b": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_LLAMA_3_3_70B || "meta-llama/llama-3.3-70b-instruct",
-  "deepseek-r1": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_DEEPSEEK_R1 || "deepseek/deepseek-r1",
   "qwen-2.5-72b": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_QWEN_2_5_72B || "qwen/qwen-2.5-72b-instruct",
-  "gpt-4o": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GPT_4O || "openai/gpt-4o",
   "claude-haiku-4.5": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_CLAUDE_HAIKU_4_5 || "anthropic/claude-haiku-4.5",
+  "gpt-5.6-luna": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GPT_5_6_LUNA || "openai/gpt-5.6-luna",
+  "gemini-3.5-flash": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GEMINI_3_5_FLASH || "google/gemini-3.5-flash",
+  "mistral-medium-3.5": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_MISTRAL_MEDIUM_3_5 || "mistralai/mistral-medium-3.5",
+  // PLUS tier — deepseek-r1/gpt-4o are the other 2 original ids/slugs, also kept byte-for-byte.
+  "deepseek-r1": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_DEEPSEEK_R1 || "deepseek/deepseek-r1",
+  "gpt-4o": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GPT_4O || "openai/gpt-4o",
+  "gpt-5.6-terra": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GPT_5_6_TERRA || "openai/gpt-5.6-terra",
+  "claude-sonnet-5": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_CLAUDE_SONNET_5 || "anthropic/claude-sonnet-5",
+  "claude-fable-5": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_CLAUDE_FABLE_5 || "anthropic/claude-fable-5",
+  "deepseek-v4-flash": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_DEEPSEEK_V4_FLASH || "deepseek/deepseek-v4-flash",
+  "glm-5.2": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GLM_5_2 || "z-ai/glm-5.2",
+  "qwen3.7-max": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_QWEN3_7_MAX || "qwen/qwen3.7-max",
+  // PRO tier — all new.
+  "gpt-5.6-sol": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GPT_5_6_SOL || "openai/gpt-5.6-sol",
+  "claude-opus-4.8": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_CLAUDE_OPUS_4_8 || "anthropic/claude-opus-4.8",
+  "gemini-3.1-pro": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GEMINI_3_1_PRO || "google/gemini-3.1-pro-preview",
+  "deepseek-v4-pro": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_DEEPSEEK_V4_PRO || "deepseek/deepseek-v4-pro",
+  "grok-4.5": process.env.HOSTED_RUNTIME_OPENROUTER_SLUG_GROK_4_5 || "x-ai/grok-4.5",
 };
 const OPENROUTER_FALLBACK_SLUG = process.env.HOSTED_RUNTIME_OPENROUTER_FALLBACK_MODEL || "anthropic/claude-haiku-4.5";
+
+// Testnet cost control: forces every PLATFORM-billed OpenRouter call onto one free model
+// regardless of which foundationModel the owner picked, while agentLlmCredit.ts's
+// chargeAgentLlmCredit/assertAgentLlmCreditCovers still charge based on that model's real tier —
+// two separate lookups keyed by the same foundationModel id, deliberately decoupled so this can
+// be flipped off at mainnet without touching pricing at all. Default free model was live-checked
+// against OpenRouter's actual $0-priced models (its free-tier roster rotates — if this one starts
+// getting rate-limited, swap the env var by hand; no automatic in-process fallback between free
+// models, matching this package's existing no-retry stance).
+const OPENROUTER_FREE_MODE = process.env.HOSTED_RUNTIME_OPENROUTER_FREE_MODE !== "false"; // default on
+const OPENROUTER_FREE_MODEL = process.env.HOSTED_RUNTIME_OPENROUTER_FREE_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
 
 // BYO_KEY path: one configured model per provider, not owner-selectable per call — env
 // overridable the same way the OpenRouter slugs above are.
@@ -51,7 +80,12 @@ function resolveModel(llmKey: ResolvedLlmKey, foundationModel: string): Language
     case LlmProvider.GEMINI:
       return createGoogleGenerativeAI({ apiKey: llmKey.apiKey })(BYO_DEFAULT_MODEL.GEMINI);
     case LlmProvider.OPENROUTER: {
-      const slug = FOUNDATION_MODEL_TO_OPENROUTER_SLUG[foundationModel] ?? OPENROUTER_FALLBACK_SLUG;
+      // Safe to override unconditionally here (never touches the ANTHROPIC/OPENAI/GEMINI
+      // branches above) because resolveLlmKey's PLATFORM branch is the only code path in this
+      // codebase that ever constructs a { provider: OPENROUTER } key — a BYO_KEY agent's stored
+      // AgentLlmKey.provider can never be OPENROUTER, since the llm-key route's BYO_PROVIDERS
+      // allow-list is hardcoded to [ANTHROPIC, OPENAI, GEMINI].
+      const slug = OPENROUTER_FREE_MODE ? OPENROUTER_FREE_MODEL : (FOUNDATION_MODEL_TO_OPENROUTER_SLUG[foundationModel] ?? OPENROUTER_FALLBACK_SLUG);
       return createOpenRouter({ apiKey: llmKey.apiKey })(slug);
     }
   }
@@ -189,7 +223,7 @@ export async function generateAgentReply(
   skills: ResolvedSkill[] = [],
 ): Promise<string> {
   if (llmBilling === LlmBilling.PLATFORM) {
-    await assertAgentLlmCreditCovers(chain, agentChainId, LlmCallKind.REACTIVE_REPLY);
+    await assertAgentLlmCreditCovers(chain, agentChainId, LlmCallKind.REACTIVE_REPLY, persona.foundationModel);
   }
 
   const model = resolveModel(llmKey, persona.foundationModel);
@@ -205,7 +239,7 @@ export async function generateAgentReply(
     await chargeAgentLlmCredit(chain, agentChainId, LlmCallKind.REACTIVE_REPLY, llmKey.provider, {
       inputTokens: usage.inputTokens ?? 0,
       outputTokens: usage.outputTokens ?? 0,
-    });
+    }, persona.foundationModel);
   }
 
   return text;
@@ -319,7 +353,7 @@ export async function decideAgentAction(
   knowledgeCandidates: KnowledgeCandidate[] = [],
 ): Promise<AgentAction> {
   if (llmBilling === LlmBilling.PLATFORM) {
-    await assertAgentLlmCreditCovers(chain, agentChainId, LlmCallKind.TICK_DECISION);
+    await assertAgentLlmCreditCovers(chain, agentChainId, LlmCallKind.TICK_DECISION, persona.foundationModel);
   }
 
   const model = resolveModel(llmKey, persona.foundationModel);
@@ -342,7 +376,7 @@ export async function decideAgentAction(
     await chargeAgentLlmCredit(chain, agentChainId, LlmCallKind.TICK_DECISION, llmKey.provider, {
       inputTokens: usage.inputTokens ?? 0,
       outputTokens: usage.outputTokens ?? 0,
-    });
+    }, persona.foundationModel);
   }
 
   return object;
