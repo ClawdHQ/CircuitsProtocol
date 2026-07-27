@@ -52,6 +52,16 @@
     "type": "error"
   },
   {
+    "inputs": [],
+    "name": "BuybackNotDue",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DexNotConfigured",
+    "type": "error"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -70,11 +80,6 @@
   {
     "inputs": [],
     "name": "EnforcedPause",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ExcessiveCreatorAlloc",
     "type": "error"
   },
   {
@@ -100,6 +105,11 @@
   {
     "inputs": [],
     "name": "LaunchNotActive",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NoBuybackPool",
     "type": "error"
   },
   {
@@ -195,6 +205,31 @@
       }
     ],
     "name": "BondingParamsUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "launchId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "usdcSpent",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "tokensBurned",
+        "type": "uint256"
+      }
+    ],
+    "name": "BuybackExecuted",
     "type": "event"
   },
   {
@@ -466,6 +501,19 @@
       {
         "indexed": false,
         "internalType": "address",
+        "name": "uniswapV2Router",
+        "type": "address"
+      }
+    ],
+    "name": "UniswapV2RouterUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
         "name": "account",
         "type": "address"
       }
@@ -514,6 +562,19 @@
   },
   {
     "inputs": [],
+    "name": "BURN_ADDRESS",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "DEFAULT_ADMIN_ROLE",
     "outputs": [
       {
@@ -527,38 +588,12 @@
   },
   {
     "inputs": [],
-    "name": "MAX_CREATOR_ALLOC_BPS",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "PAUSER_ROLE",
     "outputs": [
       {
         "internalType": "bytes32",
         "name": "",
         "type": "bytes32"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "SELL_FEE_BPS",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -580,6 +615,19 @@
   {
     "inputs": [],
     "name": "TOTAL_AGENT_TOKEN_SUPPLY",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "TRADE_FEE_BPS",
     "outputs": [
       {
         "internalType": "uint256",
@@ -670,9 +718,9 @@
         "type": "string"
       },
       {
-        "internalType": "uint16",
-        "name": "creatorAllocBps",
-        "type": "uint16"
+        "internalType": "enum ClawdHQLaunchpad.BuybackInterval",
+        "name": "buybackInterval",
+        "type": "uint8"
       }
     ],
     "name": "createLaunch",
@@ -728,6 +776,19 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "launchId",
+        "type": "uint256"
+      }
+    ],
+    "name": "executeBuyback",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1024,6 +1085,21 @@
         "internalType": "uint16",
         "name": "creatorAllocBps",
         "type": "uint16"
+      },
+      {
+        "internalType": "uint256",
+        "name": "buybackPoolUsdc",
+        "type": "uint256"
+      },
+      {
+        "internalType": "enum ClawdHQLaunchpad.BuybackInterval",
+        "name": "buybackInterval",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint64",
+        "name": "nextBuybackAt",
+        "type": "uint64"
       }
     ],
     "stateMutability": "view",
@@ -1186,6 +1262,19 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "newRouter",
+        "type": "address"
+      }
+    ],
+    "name": "setUniswapV2Router",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "bytes4",
         "name": "interfaceId",
         "type": "bytes4"
@@ -1218,6 +1307,19 @@
   {
     "inputs": [],
     "name": "treasury",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "uniswapV2Router",
     "outputs": [
       {
         "internalType": "address",

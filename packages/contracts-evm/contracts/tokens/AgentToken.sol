@@ -11,8 +11,9 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 /// the sender or the recipient (i.e. buys and sells through the bonding curve);
 /// peer-to-peer transfers are blocked to prevent an off-curve secondary market
 /// from forming before the token graduates to a DEX. After graduation, transfers
-/// are unrestricted and a 1% fee applies, split 50/50 between burn and the
-/// agent's treasury.
+/// are unrestricted and a 2% fee applies, split 50/50 between burn and the
+/// agent's treasury — matching ClawdHQLaunchpad's own TRADE_FEE_BPS rate, so the
+/// fee doesn't drop the moment a token graduates to its DEX secondary market.
 contract AgentToken is ERC20 {
     /// @notice The ClawdHQCore contract that deployed this token and controls the bonding curve.
     address public immutable launchpad;
@@ -23,11 +24,12 @@ contract AgentToken is ERC20 {
     /// @notice True once `graduateToken` has been called by the launchpad.
     bool public graduated;
 
-    /// @notice Cumulative amount of tokens burned via the post-graduation transfer fee.
+    /// @notice Cumulative amount of tokens burned via the post-graduation transfer fee or a
+    /// pre-graduation {ClawdHQLaunchpad-executeBuyback} call.
     uint256 public burnedSupply;
 
-    /// @notice Post-graduation transfer fee, in basis points (1% = 100 bps).
-    uint16 public constant TRANSFER_FEE_BPS = 100;
+    /// @notice Post-graduation transfer fee, in basis points (2% = 200 bps).
+    uint16 public constant TRANSFER_FEE_BPS = 200;
 
     error OnlyLaunchpad();
     error AlreadyGraduated();
@@ -53,6 +55,15 @@ contract AgentToken is ERC20 {
         if (graduated) revert AlreadyGraduated();
         graduated = true;
         agentTreasury = agentTreasury_;
+    }
+
+    /// @notice Burns `amount` from the launchpad's own held (unsold) balance — the launchpad's
+    /// pre-graduation buyback-and-burn mechanic (see ClawdHQLaunchpad's executeBuyback):
+    /// tokens are "bought" from the curve exactly like a real buy (increasing tokensSold at the
+    /// current market price) but burned instead of transferred to a buyer.
+    function burnFromLaunchpad(uint256 amount) external onlyLaunchpad {
+        _burn(launchpad, amount);
+        burnedSupply += amount;
     }
 
     /// @dev Enforces the pre-graduation transfer lock and applies the post-graduation fee.

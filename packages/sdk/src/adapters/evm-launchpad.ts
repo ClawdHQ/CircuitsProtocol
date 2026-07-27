@@ -1,6 +1,6 @@
 import { getContract, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
 import { clawdHQLaunchpadAbi } from "../abi/index.js";
-import type { LaunchSummary } from "../types.js";
+import type { LaunchSummary, BuybackInterval } from "../types.js";
 import { ensureErc20Allowance } from "./erc20.js";
 
 export interface EvmLaunchpadAdapterConfig {
@@ -62,7 +62,7 @@ export class EvmLaunchpadAdapter {
 
   async getLaunch(launchId: bigint): Promise<LaunchSummary> {
     const launch = (await this.contract.read.launches([launchId])) as unknown as readonly [
-      bigint, bigint, Address, string, string, Address, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, boolean, boolean, number,
+      bigint, bigint, Address, string, string, Address, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, boolean, boolean, number, bigint, number, bigint,
     ];
     return {
       launchId: launch[0].toString(),
@@ -77,6 +77,9 @@ export class EvmLaunchpadAdapter {
       active: launch[16],
       bondingBasePrice: launch[10],
       bondingSlope: launch[11],
+      buybackPoolUsdc: launch[18],
+      buybackInterval: launch[19] as BuybackInterval,
+      nextBuybackAt: launch[20],
     };
   }
 
@@ -84,15 +87,10 @@ export class EvmLaunchpadAdapter {
     return (await this.contract.read.getCurrentPrice([launchId])) as bigint;
   }
 
-  async createLaunch(args: { agentId: bigint; name: string; symbol: string; creatorAllocBps: number }): Promise<Hex> {
+  async createLaunch(args: { agentId: bigint; name: string; symbol: string; buybackInterval: BuybackInterval }): Promise<Hex> {
     const launchFee = (await this.contract.read.launchFee([])) as bigint;
     await this.ensureUsdcAllowance(this.getSenderAddress(), launchFee);
-    return this.contract.write.createLaunch([
-      args.agentId,
-      args.name,
-      args.symbol,
-      args.creatorAllocBps,
-    ]) as Promise<Hex>;
+    return this.contract.write.createLaunch([args.agentId, args.name, args.symbol, args.buybackInterval]) as Promise<Hex>;
   }
 
   async buyTokens(launchId: bigint, usdcAmount: bigint, minTokensOut: bigint): Promise<Hex> {
@@ -106,5 +104,12 @@ export class EvmLaunchpadAdapter {
 
   async graduateLaunch(launchId: bigint): Promise<Hex> {
     return this.contract.write.graduateLaunch([launchId]) as Promise<Hex>;
+  }
+
+  /** Spends this launch's accumulated buyback pool to repurchase-and-burn tokens from the
+   * curve at the current price — permissionless, callable by anyone regardless of whether
+   * they've ever bought/sold this launch. */
+  async executeBuyback(launchId: bigint): Promise<Hex> {
+    return this.contract.write.executeBuyback([launchId]) as Promise<Hex>;
   }
 }

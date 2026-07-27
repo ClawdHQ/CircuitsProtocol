@@ -19,6 +19,22 @@ interface IAgentWalletRegistry {
     function agentWallet(uint256 agentId) external view returns (address);
 }
 
+/// @dev Minimal Uniswap V2 Router02 surface — only `addLiquidity`, which is all
+/// {ClawdHQLaunchpad-graduateLaunch} needs. Signature is Uniswap V2's own stable,
+/// unchanged-since-launch interface, not this project's own design.
+interface IUniswapV2Router02 {
+    function addLiquidity(
+        address tokenA,
+        address tokenB,
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin,
+        address to,
+        uint256 deadline
+    ) external returns (uint256 amountA, uint256 amountB, uint256 liquidity);
+}
+
 /// @title ClawdHQLaunchpad
 /// @notice Bonding-curve agent-token launchpad — split out of ClawdHQCore (which owns agent
 /// identity and the job marketplace) into its own UUPS proxy, same reasoning that already put
@@ -30,6 +46,15 @@ interface IAgentWalletRegistry {
 /// {_usdcOutForSell}.
 /// @dev Reads agent ownership from ClawdHQCore via {IClawdHQCore-agents} rather than holding
 /// its own copy — Core remains the sole source of truth for who owns an agent.
+///
+/// Fair-launch tokenomics (v2 of this contract): 100% of TOTAL_AGENT_TOKEN_SUPPLY starts on the
+/// curve — no creator pre-allocation. Every buy and sell pays TRADE_FEE_BPS, split 50/50 between
+/// the creator (paid immediately, same {_payoutAddress} destination the old pre-allocation used)
+/// and a per-launch buyback pool that anyone can spend via {executeBuyback} to repurchase-and-
+/// burn from the curve at the current price — gated to once per the creator's own chosen
+/// {BuybackInterval}, picked at {createLaunch} time and fixed for the life of the launch.
+/// Graduation now actually migrates liquidity to a real DEX (see {graduateLaunch}) instead of
+/// just flipping a flag.
 contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUpgradeable, UUPSUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -39,6 +64,17 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
 
     // ============================================================ Types ===
 
+    /// @notice How often {executeBuyback} may run for a given launch — chosen once by the
+    /// creator at {createLaunch} time, fixed for the launch's lifetime (not admin- or
+    /// creator-adjustable afterward, so it can't be loosened/tightened to game holder
+    /// expectations post-launch).
+    enum BuybackInterval {
+        DAILY,
+        WEEKLY,
+        MONTHLY,
+        QUARTERLY
+    }
+
     struct AgentLaunch {
         uint256 launchId;
         uint256 agentId;
@@ -47,8 +83,8 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
         string symbol;
         address creator;
         uint256 totalSupply; // fixed 1_000_000_000e18
-        uint256 usdcRaised; // current USDC reserve held against this launch
-        uint256 tokensSold; // 18-decimal token units sold via the curve
+        uint256 usdcRaised; // current USDC reserve held against this launch (excludes fees)
+        uint256 tokensSold; // 18-decimal token units sold via the curve (includes buyback-burned tokens)
         uint256 graduationThreshold; // USDC, 6 decimals
         uint256 bondingBasePrice; // USDC (6dec) per whole token at tokensSold = 0
         uint256 bondingSlope; // USDC (6dec) increase per whole token sold
@@ -57,17 +93,24 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
         uint64 antiSnipeUntil;
         bool graduated;
         bool active;
+        /// @dev Deprecated — creator pre-allocations were removed in favor of 100% fair launch
+        /// (see the contract-level doc comment). Always written as 0 now; kept declared, not
+        /// deleted, so the UUPS upgrade from the pre-fair-launch version doesn't reorder any
+        /// trailing struct field's storage slot.
         uint16 creatorAllocBps;
+        uint256 buybackPoolUsdc; // accumulated trade-fee USDC earmarked for the next executeBuyback()
+        BuybackInterval buybackInterval; // creator's choice at createLaunch time, fixed thereafter
+        uint64 nextBuybackAt; // executeBuyback reverts (BuybackNotDue) before this timestamp
     }
 
     // ===================================================== Constants =====
 
     uint256 public constant TOTAL_AGENT_TOKEN_SUPPLY = 1_000_000_000e18;
-    uint256 public constant MAX_CREATOR_ALLOC_BPS = 2_000; // 20%
-    uint256 public constant SELL_FEE_BPS = 200; // 2%
+    uint256 public constant TRADE_FEE_BPS = 200; // 2%, applied to both buys and sells
     uint256 public constant ANTI_SNIPE_WINDOW = 10 minutes;
     uint256 public constant ANTI_SNIPE_MAX_BPS = 500; // 5% of total supply per wallet
     uint256 public constant TOKEN_DECIMALS_FACTOR = 1e18;
+    address public constant BURN_ADDRESS = 0x000000000000000000000000000000000000dEaD;
 
     // ======================================================== Storage =====
 
@@ -90,23 +133,33 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
     mapping(uint256 => uint256) public launchIdByAgentId;
     mapping(uint256 => mapping(address => uint256)) public launchBuyerPurchased; // anti-snipe tracking
 
+    /// @notice Uniswap V2 Router02 used at graduation to migrate liquidity to a real DEX.
+    /// address(0) means graduation isn't wired up on this chain yet — {graduateLaunch} reverts
+    /// rather than silently skipping the DEX migration. Only Ethereum Sepolia has a verified
+    /// official Uniswap V2 deployment among this app's supported testnets as of this writing
+    /// (confirmed against developers.uniswap.org's own deployments list, then against the
+    /// address's actual deployed bytecode) — Base Sepolia and Arc Testnet have none, so this
+    /// stays unset (and graduation stays disabled) there until a real DEX is verified.
+    address public uniswapV2Router;
+
     // ========================================================= Events =====
 
     event LaunchCreated(uint256 indexed launchId, uint256 indexed agentId, address indexed token, string name, string symbol);
     event TokensPurchased(uint256 indexed launchId, address indexed buyer, uint256 usdcIn, uint256 tokensOut);
     event TokensSold(uint256 indexed launchId, address indexed seller, uint256 tokensIn, uint256 usdcOut);
     event LaunchGraduated(uint256 indexed launchId, uint256 indexed agentId, address indexed token, uint256 usdcRaised, uint256 tokensSold);
+    event BuybackExecuted(uint256 indexed launchId, uint256 usdcSpent, uint256 tokensBurned);
 
     event LaunchFeeUpdated(uint256 launchFee);
     event BondingParamsUpdated(uint256 basePrice, uint256 slope, uint256 graduationThreshold);
     event TreasuryUpdated(address treasury);
     event AgentWalletRegistryUpdated(address agentWalletRegistry);
+    event UniswapV2RouterUpdated(address uniswapV2Router);
 
     // ========================================================= Errors =====
 
     error NotAgentOwner();
     error ZeroAmount();
-    error ExcessiveCreatorAlloc();
     error AlreadyLaunched();
     error LaunchNotActive();
     error AntiSnipeLimitExceeded();
@@ -114,6 +167,9 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
     error AlreadyGraduated();
     error SlippageExceeded();
     error InsufficientTokensSold();
+    error NoBuybackPool();
+    error DexNotConfigured();
+    error BuybackNotDue();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -141,14 +197,14 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
         launchFee = 0; // testnet default, matches Core's convention
         defaultBondingBasePrice = 1_000; // 0.001 USDC per whole token at zero supply
         defaultBondingSlope = 1; // +0.000001 USDC per whole token sold
-        defaultGraduationThreshold = 69_000e6; // 69,000 USDC
+        defaultGraduationThreshold = 19_000e6; // 19,000 USDC
 
         _nextLaunchId = 1;
     }
 
     function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
-    /// @dev Payout destination for an agent's launchpad creator allocation: its
+    /// @dev Payout destination for an agent's trading-fee creator share: its
     /// AgentWalletRegistry-registered wallet, or its Core-registered owner if this agent's
     /// wallet hasn't been provisioned there yet. Mirrors ClawdHQCore's own `_payoutAddress`
     /// (used there for job payouts) exactly, reading ownership via {IClawdHQCore-agents}
@@ -158,18 +214,40 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
         return wallet != address(0) ? wallet : ownerFallback;
     }
 
+    /// @dev Fixed-seconds mapping for {BuybackInterval} — MONTHLY/QUARTERLY use the common
+    /// 30-day/90-day on-chain approximation (exact calendar months aren't representable as a
+    /// fixed second count), not a real calendar-month calculation.
+    function _intervalSeconds(BuybackInterval interval) private pure returns (uint64) {
+        if (interval == BuybackInterval.DAILY) return 1 days;
+        if (interval == BuybackInterval.WEEKLY) return 7 days;
+        if (interval == BuybackInterval.MONTHLY) return 30 days;
+        return 90 days; // QUARTERLY
+    }
+
+    /// @dev Splits a trade fee 50/50 between the creator (paid immediately) and this launch's
+    /// buyback pool (accumulated for {executeBuyback}). Shared by {buyTokens} and {sellTokens}
+    /// so the split logic can't drift between the two.
+    function _distributeTradeFee(AgentLaunch storage launch, uint256 fee) private {
+        if (fee == 0) return;
+        uint256 creatorShare = fee / 2;
+        uint256 buybackShare = fee - creatorShare;
+        launch.buybackPoolUsdc += buybackShare;
+        if (creatorShare > 0) {
+            usdc.safeTransfer(_payoutAddress(launch.agentId, launch.creator), creatorShare);
+        }
+    }
+
     // ============================================================ Launchpad
 
     function createLaunch(
         uint256 agentId,
         string calldata name,
         string calldata symbol,
-        uint16 creatorAllocBps
+        BuybackInterval buybackInterval
     ) external whenNotPaused nonReentrant returns (uint256 launchId, address token) {
         (, address ownerAddr) = core.agents(agentId);
         if (ownerAddr != msg.sender) revert NotAgentOwner();
         if (launchIdByAgentId[agentId] != 0) revert AlreadyLaunched();
-        if (creatorAllocBps > MAX_CREATOR_ALLOC_BPS) revert ExcessiveCreatorAlloc();
 
         if (launchFee > 0) {
             usdc.safeTransferFrom(msg.sender, treasury, launchFee);
@@ -197,16 +275,18 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
             antiSnipeUntil: uint64(block.timestamp + ANTI_SNIPE_WINDOW),
             graduated: false,
             active: true,
-            creatorAllocBps: creatorAllocBps
+            creatorAllocBps: 0,
+            buybackPoolUsdc: 0,
+            buybackInterval: buybackInterval,
+            nextBuybackAt: uint64(block.timestamp) + _intervalSeconds(buybackInterval)
         });
         launchIdByAgentId[agentId] = launchId;
         totalLaunches++;
 
-        if (creatorAllocBps > 0) {
-            uint256 creatorAmount = (TOTAL_AGENT_TOKEN_SUPPLY * creatorAllocBps) / 10_000;
-            // The agent's earnings, not necessarily the caller's directly.
-            deployed.transfer(_payoutAddress(agentId, ownerAddr), creatorAmount);
-        }
+        // 100% fair launch: the entire supply stays on the curve, available to the first buyer —
+        // no pre-allocation is minted to the creator. The creator instead earns through their
+        // 50% share of every trade's fee (see {_distributeTradeFee}) and the agent's own
+        // AgentWallet earnings, same as everyone else.
 
         emit LaunchCreated(launchId, agentId, token, name, symbol);
     }
@@ -216,7 +296,10 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
         if (!launch.active || launch.graduated) revert LaunchNotActive();
         if (usdcAmount == 0) revert ZeroAmount();
 
-        uint256 tokensOut = _tokensOutForBuy(launch, usdcAmount);
+        uint256 fee = (usdcAmount * TRADE_FEE_BPS) / 10_000;
+        uint256 netUsdcForCurve = usdcAmount - fee;
+
+        uint256 tokensOut = _tokensOutForBuy(launch, netUsdcForCurve);
         if (tokensOut < minTokensOut) revert SlippageExceeded();
 
         if (block.timestamp < launch.antiSnipeUntil) {
@@ -230,7 +313,8 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
         AgentToken(launch.token).transfer(msg.sender, tokensOut);
 
         launch.tokensSold += tokensOut;
-        launch.usdcRaised += usdcAmount;
+        launch.usdcRaised += netUsdcForCurve;
+        _distributeTradeFee(launch, fee);
 
         emit TokensPurchased(launchId, msg.sender, usdcAmount, tokensOut);
     }
@@ -251,22 +335,73 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
 
         uint256 fee = grossUsdcOut - netUsdcOut;
         usdc.safeTransfer(msg.sender, netUsdcOut);
-        if (fee > 0) {
-            usdc.safeTransfer(treasury, fee);
-        }
+        _distributeTradeFee(launch, fee);
 
         emit TokensSold(launchId, msg.sender, tokenAmount, netUsdcOut);
     }
 
+    /// @notice Spends this launch's accumulated buyback pool to repurchase tokens from the
+    /// curve at the current price (exactly like a real buy, just protocol-funded) and burns
+    /// them — permissionless by design, so the buyback doesn't depend on this app's own backend
+    /// staying up. Anyone (a wallet, a keeper, this app's own indexer) can call it once
+    /// `nextBuybackAt` has passed, at whatever cadence the creator chose at {createLaunch} time;
+    /// calling it early reverts (BuybackNotDue) rather than draining the pool ahead of schedule.
+    /// The pool keeps accumulating between eligible windows regardless of how often this is
+    /// called — there's no advantage to spamming it once it's due, only to eventually calling it.
+    function executeBuyback(uint256 launchId) external whenNotPaused nonReentrant {
+        AgentLaunch storage launch = launches[launchId];
+        if (!launch.active || launch.graduated) revert LaunchNotActive();
+        if (block.timestamp < launch.nextBuybackAt) revert BuybackNotDue();
+        uint256 pool = launch.buybackPoolUsdc;
+        if (pool == 0) revert NoBuybackPool();
+
+        uint256 tokensOut = _tokensOutForBuy(launch, pool);
+
+        launch.tokensSold += tokensOut;
+        launch.usdcRaised += pool;
+        launch.buybackPoolUsdc = 0;
+        launch.nextBuybackAt = uint64(block.timestamp) + _intervalSeconds(launch.buybackInterval);
+
+        AgentToken(launch.token).burnFromLaunchpad(tokensOut);
+
+        emit BuybackExecuted(launchId, pool, tokensOut);
+    }
+
+    /// @notice Once a launch crosses its graduation threshold, migrates the raised USDC plus
+    /// every unsold token into a real Uniswap V2 pool, then burns the LP tokens outright (sent
+    /// straight to BURN_ADDRESS as `addLiquidity`'s recipient) — no one, including this
+    /// contract's admin, can ever pull that liquidity back out, which is the whole point: it's
+    /// what actually backs the token once it leaves the curve. Reverts if this chain has no
+    /// uniswapV2Router configured rather than pretending to graduate without real liquidity.
     function graduateLaunch(uint256 launchId) external nonReentrant {
         AgentLaunch storage launch = launches[launchId];
         if (launch.graduated) revert AlreadyGraduated();
         if (launch.usdcRaised < launch.graduationThreshold) revert ThresholdNotMet();
+        if (uniswapV2Router == address(0)) revert DexNotConfigured();
 
         launch.graduated = true;
         launch.active = false;
         launch.graduatedAt = uint64(block.timestamp);
         graduatedLaunches++;
+
+        uint256 remainingTokens = launch.totalSupply - launch.tokensSold;
+        uint256 usdcForLiquidity = launch.usdcRaised;
+
+        if (remainingTokens > 0 && usdcForLiquidity > 0) {
+            IERC20(launch.token).forceApprove(uniswapV2Router, remainingTokens);
+            usdc.forceApprove(uniswapV2Router, usdcForLiquidity);
+
+            IUniswapV2Router02(uniswapV2Router).addLiquidity(
+                launch.token,
+                address(usdc),
+                remainingTokens,
+                usdcForLiquidity,
+                0, // amountAMin — a testnet launchpad; accept full slippage rather than risk graduation reverting
+                0, // amountBMin
+                BURN_ADDRESS,
+                block.timestamp
+            );
+        }
 
         AgentToken(launch.token).graduateToken(launch.creator);
 
@@ -304,13 +439,13 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
 
     /// @dev Direct evaluation of the same integral for a known token amount being sold,
     /// from `soldWhole - delta` to `soldWhole`. Returns both the gross curve value and the
-    /// net amount after the protocol's `SELL_FEE_BPS` sell fee.
+    /// net amount after the protocol's `TRADE_FEE_BPS` sell fee.
     function _usdcOutForSell(AgentLaunch storage launch, uint256 tokenAmount) private view returns (uint256 grossUsdcOut, uint256 netUsdcOut) {
         uint256 soldWhole = launch.tokensSold / TOKEN_DECIMALS_FACTOR;
         uint256 deltaWhole = tokenAmount / TOKEN_DECIMALS_FACTOR;
 
         grossUsdcOut = launch.bondingBasePrice * deltaWhole + (launch.bondingSlope * (2 * soldWhole * deltaWhole - deltaWhole * deltaWhole)) / 2;
-        uint256 fee = (grossUsdcOut * SELL_FEE_BPS) / 10_000;
+        uint256 fee = (grossUsdcOut * TRADE_FEE_BPS) / 10_000;
         netUsdcOut = grossUsdcOut - fee;
     }
 
@@ -339,6 +474,14 @@ contract ClawdHQLaunchpad is Initializable, AccessControlUpgradeable, PausableUp
         require(newRegistry != address(0), "ZeroAddress");
         agentWalletRegistry = newRegistry;
         emit AgentWalletRegistryUpdated(newRegistry);
+    }
+
+    /// @notice Points graduation at a real Uniswap V2 Router02 for this chain — leave unset
+    /// (address(0)) on any chain without a verified official deployment; {graduateLaunch}
+    /// reverts rather than migrating liquidity to an unverified contract.
+    function setUniswapV2Router(address newRouter) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uniswapV2Router = newRouter;
+        emit UniswapV2RouterUpdated(newRouter);
     }
 
     function pause() external onlyRole(PAUSER_ROLE) {

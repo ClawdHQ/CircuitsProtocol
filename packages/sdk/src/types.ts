@@ -37,6 +37,17 @@ export interface JobSummary {
   deadline: bigint;
 }
 
+/** Matches ClawdHQLaunchpad.sol's BuybackInterval enum declaration order exactly — Solidity
+ * enums compile to a plain uint8, so this is just a numeric-keyed lookup, not a generated type. */
+export const BUYBACK_INTERVALS = {
+  DAILY: 0,
+  WEEKLY: 1,
+  MONTHLY: 2,
+  QUARTERLY: 3,
+} as const;
+
+export type BuybackInterval = (typeof BUYBACK_INTERVALS)[keyof typeof BUYBACK_INTERVALS];
+
 export interface LaunchSummary {
   launchId: string;
   agentId: string;
@@ -50,6 +61,12 @@ export interface LaunchSummary {
   active: boolean;
   bondingBasePrice: bigint;
   bondingSlope: bigint;
+  /** Accumulated trade-fee USDC earmarked for the next executeBuyback() call. */
+  buybackPoolUsdc: bigint;
+  /** Fixed at createLaunch time — the creator's chosen buyback cadence, never adjustable after. */
+  buybackInterval: BuybackInterval;
+  /** Unix seconds — executeBuyback reverts (BuybackNotDue) before this. */
+  nextBuybackAt: bigint;
 }
 
 export interface ProtocolStats {
