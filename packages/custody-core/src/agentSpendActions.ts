@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { parseUnits, isAddress } from "viem";
 import { SpendAction, type Chain } from "@clawdhq/custody-db";
-import { getDecryptedAgentWallet } from "./agentWalletCustody.js";
+import { getAgentEvmSigner } from "./agentEvmSigner.js";
 import { executeAgentSpend, type AgentSpendExecutionResult } from "./agentSpendPolicy.js";
-import { isEvmPrismaChain, viemChainFor, rpcUrlFor, usdcAddressFor, type EvmPrismaChain } from "./evmChainConfig.js";
+import { isEvmPrismaChain, type EvmPrismaChain } from "./evmChainConfig.js";
 import { getSigningEvmAdapter, transferErc20Amount } from "./signingEvmAdapter.js";
 import { swapUsdcForWeth } from "./uniswapSwap.js";
+import { postAgentChainActivityToClawdHq } from "./clawdhqLinkCustody.js";
 
 /** Same digest convention as subscriptionRunJob.ts's sha256Hex — reimplemented here (not
  * imported) since that one isn't exported from this package's public surface. */
@@ -31,11 +32,11 @@ export async function postJobFromAgentWallet(
   if (!isEvmPrismaChain(chain)) throw new Error(`postJobFromAgentWallet isn't wired up for ${chain} yet — EVM only for now.`);
   const evmChain: EvmPrismaChain = chain;
 
-  return executeAgentSpend(chain, agentChainId, SpendAction.POST_JOB, budgetUsdc, async () => {
-    const wallet = await getDecryptedAgentWallet(evmChain, agentChainId);
-    if (!wallet) throw new Error("No AgentWallet has been provisioned for this agent yet.");
+  const result = await executeAgentSpend(chain, agentChainId, SpendAction.POST_JOB, budgetUsdc, async () => {
+    const signer = await getAgentEvmSigner(evmChain, agentChainId);
+    if (!signer) throw new Error("No AgentWallet has been provisioned for this agent yet.");
 
-    const adapter = getSigningEvmAdapter(evmChain, wallet.privateKey);
+    const adapter = getSigningEvmAdapter(evmChain, signer);
     const statsBefore = await adapter.getProtocolStats();
     const jobChainId = (statsBefore.totalJobs + 1n).toString();
 
@@ -53,6 +54,11 @@ export async function postJobFromAgentWallet(
 
     return { txHashOrRef, targetRef: jobChainId };
   });
+
+  await postAgentChainActivityToClawdHq(evmChain, agentChainId, (name, profileUrl) =>
+    `💼 ${name} just hired agent #${hiredAgentId} for a ${budgetUsdc} USDC job on Circuits Protocol. ${profileUrl}`
+  );
+  return result;
 }
 
 /** X402_PAYMENT spend action: a direct USDC transfer from the agent's own AgentWallet to
@@ -70,15 +76,20 @@ export async function payFromAgentWallet(chain: Chain, agentChainId: string, rec
   const evmChain: EvmPrismaChain = chain;
   if (!isAddress(recipient)) throw new Error(`"${recipient}" isn't a valid ${chain} address.`);
 
-  return executeAgentSpend(chain, agentChainId, SpendAction.X402_PAYMENT, amountUsdc, async () => {
-    const wallet = await getDecryptedAgentWallet(evmChain, agentChainId);
-    if (!wallet) throw new Error("No AgentWallet has been provisioned for this agent yet.");
+  const result = await executeAgentSpend(chain, agentChainId, SpendAction.X402_PAYMENT, amountUsdc, async () => {
+    const signer = await getAgentEvmSigner(evmChain, agentChainId);
+    if (!signer) throw new Error("No AgentWallet has been provisioned for this agent yet.");
 
     const amount = parseUnits(amountUsdc, 6);
-    const result = await transferErc20Amount(wallet.privateKey, viemChainFor(evmChain), rpcUrlFor(evmChain), usdcAddressFor(evmChain), recipient as `0x${string}`, amount);
+    const transfer = await transferErc20Amount(signer, evmChain, recipient as `0x${string}`, amount);
 
-    return { txHashOrRef: result.txHashOrRef, targetRef: `${recipient} (${reason || "no reason given"})` };
+    return { txHashOrRef: transfer.txHashOrRef, targetRef: `${recipient} (${reason || "no reason given"})` };
   });
+
+  await postAgentChainActivityToClawdHq(evmChain, agentChainId, (name, profileUrl) =>
+    `💸 ${name} just made an x402 payment of ${amountUsdc} USDC on Circuits Protocol. ${profileUrl}`
+  );
+  return result;
 }
 
 /** SWAP spend action: swaps the agent's own AgentWallet USDC for WETH via a real Uniswap V3
@@ -96,13 +107,18 @@ export async function swapAgentWalletUsdcForWeth(chain: Chain, agentChainId: str
   if (!isEvmPrismaChain(chain)) throw new Error(`swapAgentWalletUsdcForWeth isn't wired up for ${chain} yet — EVM only for now.`);
   const evmChain: EvmPrismaChain = chain;
 
-  return executeAgentSpend(chain, agentChainId, SpendAction.SWAP, amountUsdc, async () => {
-    const wallet = await getDecryptedAgentWallet(evmChain, agentChainId);
-    if (!wallet) throw new Error("No AgentWallet has been provisioned for this agent yet.");
+  const result = await executeAgentSpend(chain, agentChainId, SpendAction.SWAP, amountUsdc, async () => {
+    const signer = await getAgentEvmSigner(evmChain, agentChainId);
+    if (!signer) throw new Error("No AgentWallet has been provisioned for this agent yet.");
 
     const amountIn = parseUnits(amountUsdc, 6);
-    const result = await swapUsdcForWeth(evmChain, wallet.privateKey, amountIn);
+    const swap = await swapUsdcForWeth(evmChain, signer, amountIn);
 
-    return { txHashOrRef: result.txHashOrRef, targetRef: `${result.amountInUsdc} USDC -> ${result.amountOutWeth} WETH` };
+    return { txHashOrRef: swap.txHashOrRef, targetRef: `${swap.amountInUsdc} USDC -> ${swap.amountOutWeth} WETH` };
   });
+
+  await postAgentChainActivityToClawdHq(evmChain, agentChainId, (name, profileUrl) =>
+    `🔄 ${name} just swapped ${result.targetRef} on Circuits Protocol. ${profileUrl}`
+  );
+  return result;
 }

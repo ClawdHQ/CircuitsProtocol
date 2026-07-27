@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 import { prisma } from "@clawdhq/custody-db";
 import { getDecryptedSubscriptionWallet } from "./subscriptionCustody.js";
-import { getSigningEvmAdapter } from "./signingEvmAdapter.js";
+import { getSigningEvmAdapter, localEvmSigner } from "./signingEvmAdapter.js";
 import { isEvmPrismaChain, type EvmPrismaChain } from "./evmChainConfig.js";
 import { getSigningSolanaAdapter } from "./signingSolanaAdapter.js";
 import { isSolanaPrismaChain, type SolanaPrismaChain } from "./solanaChainConfig.js";
@@ -40,7 +40,7 @@ export async function confirmSubscriptionJob(subscriptionId: string, chain: Rela
 
   let txHash: string;
   if (isEvmPrismaChain(chain)) {
-    txHash = await getSigningEvmAdapter(chain, wallet.privateKey).confirmDelivery(BigInt(jobChainId), rating);
+    txHash = await getSigningEvmAdapter(chain, localEvmSigner(chain, wallet.privateKey)).confirmDelivery(BigInt(jobChainId), rating);
   } else if (isSolanaPrismaChain(chain)) {
     // Unlike EVM, SolanaAdapter.confirmDelivery needs the hired agent's id explicitly (it can't
     // resolve it from the job account alone the way disputeJob does) — read it off the
@@ -75,7 +75,7 @@ export async function cancelSubscriptionJob(subscriptionId: string, chain: Relay
 
   let txHash: string;
   if (isEvmPrismaChain(chain)) {
-    txHash = await getSigningEvmAdapter(chain, wallet.privateKey).cancelJob(BigInt(jobChainId));
+    txHash = await getSigningEvmAdapter(chain, localEvmSigner(chain, wallet.privateKey)).cancelJob(BigInt(jobChainId));
   } else if (isSolanaPrismaChain(chain)) {
     txHash = await getSigningSolanaAdapter(chain, wallet.privateKey).cancelJob({ employer: new PublicKey(wallet.address), jobId: Number(jobChainId) });
   } else {
@@ -93,7 +93,7 @@ export async function disputeSubscriptionJob(subscriptionId: string, chain: Rela
 
   let txHash: string;
   if (isEvmPrismaChain(chain)) {
-    txHash = await getSigningEvmAdapter(chain, wallet.privateKey).disputeJob(BigInt(jobChainId));
+    txHash = await getSigningEvmAdapter(chain, localEvmSigner(chain, wallet.privateKey)).disputeJob(BigInt(jobChainId));
   } else if (isSolanaPrismaChain(chain)) {
     txHash = await getSigningSolanaAdapter(chain, wallet.privateKey).disputeJob({ signer: new PublicKey(wallet.address), jobId: Number(jobChainId) });
   } else {

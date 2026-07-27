@@ -5,6 +5,7 @@ export {
   isEvmPrismaChain,
   viemChainFor,
   rpcUrlFor,
+  rpcTransportFor,
   contractAddressFor,
   launchpadAddressFor,
   usdcAddressFor,
@@ -12,9 +13,11 @@ export {
 export {
   getSigningEvmAdapter,
   getSigningEvmLaunchpadAdapter,
+  localEvmSigner,
   withdrawErc20Balance,
   transferErc20Amount,
   readUsdcBalance,
+  type EvmSigner,
   type Erc20WithdrawResult,
 } from "./signingEvmAdapter.js";
 export {
@@ -68,10 +71,32 @@ export { startPipeline, advancePipelineForJobOutcome } from "./pipelineAdvance.j
 export { withdrawPipelineWallet } from "./pipelineWithdraw.js";
 export { getOrCreateFacilitatorWallet, getDecryptedFacilitatorWallet, setFacilitatorKillSwitch } from "./facilitatorCustody.js";
 export { pullPayment, PaymentRejection, type PullPaymentResult } from "./facilitatorPullPayment.js";
-export { provisionAgentWallet, getAgentWalletAddress, getDecryptedAgentWallet } from "./agentWalletCustody.js";
+export {
+  provisionAgentWallet,
+  provisionAgentWalletForOwner,
+  savePendingCircleAgentWalletIntent,
+  getAgentWalletAddress,
+  getDecryptedAgentWallet,
+} from "./agentWalletCustody.js";
+export { getAgentEvmSigner, type AgentEvmSigner } from "./agentEvmSigner.js";
+export {
+  saveCircleAgentWalletCredential,
+  getDecryptedCircleAgentWalletCredential,
+  getCircleAgentWalletCredentialId,
+  type CircleCredentialInput,
+} from "./circleAgentCredentialCustody.js";
 export { claimAgentWallet, readAgentWalletBalance } from "./agentWalletClaim.js";
 export { getOrCreateRegistrarWallet, getDecryptedRegistrarWallet } from "./registrarCustody.js";
 export { saveAgentLlmKey, hasActiveAgentLlmKey, getDecryptedAgentLlmKey, revokeAgentLlmKey } from "./agentLlmKeyCustody.js";
+export {
+  connectAgentToClawdHq,
+  retryClawdHqWalletLink,
+  getClawdHqLinkStatus,
+  postAgentActivityToClawdHq,
+  postAgentChainActivityToClawdHq,
+  type ClawdHqConnectResult,
+} from "./clawdhqLinkCustody.js";
+export { clawdHqProfileUrl, circuitsAgentProfileUrl } from "./clawdhqClient.js";
 export { checkAgentSpendPolicy, executeAgentSpend, SpendRejection, type AgentSpendExecutionResult } from "./agentSpendPolicy.js";
 export { postJobFromAgentWallet, payFromAgentWallet, swapAgentWalletUsdcForWeth } from "./agentSpendActions.js";
 export {
@@ -112,5 +137,12 @@ export {
   topUpAgentLlmCredit,
   getAgentWalletLiveBalance,
   platformLlmCostFor,
+  usdcToCredits,
+  creditsToUsdc,
+  CREDITS_PER_USDC,
+  tierForHistoricalCost,
   LlmCreditRejection,
 } from "./agentLlmCredit.js";
+// The foundation-model catalog is NOT re-exported here — same reasoning as Skill/BUILTIN_SKILLS
+// above: it's browser-safe pure data, so it has its own subpath instead:
+// import from "@clawdhq/custody-core/llm-model-catalog". See tsup.config.ts's doc comment.

@@ -8,7 +8,7 @@ import { z } from "zod";
 // amount through a payer-granted ERC-20 allowance (see X402Facilitator.sol) — a real payment,
 // on real MockUSDC, gated by a real on-chain idempotency check, just custodial rather than
 // trustless. `scheme` is named "exact" to match the spec's field, but `extra.settlement` always
-// says "clawdhq-facilitator-pull" so nothing here is misrepresented as textbook x402.
+// says "circuitsprotocol-facilitator-pull" so nothing here is misrepresented as textbook x402.
 //
 // Lives in custody-core (not apps/web) so both an app route (agentX402.ts, knowledgeX402.ts) and
 // a portable client (a2aClient.ts, knowledgeResolveClient.ts) can use the identical encode/decode

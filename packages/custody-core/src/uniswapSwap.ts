@@ -1,6 +1,6 @@
-import { createPublicClient, createWalletClient, http, parseAbi, formatUnits } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
-import { viemChainFor, rpcUrlFor, usdcAddressFor, type EvmPrismaChain } from "./evmChainConfig.js";
+import { createPublicClient, createWalletClient, parseAbi, formatUnits } from "viem";
+import { viemChainFor, rpcTransportFor, usdcAddressFor, type EvmPrismaChain } from "./evmChainConfig.js";
+import type { EvmSigner } from "./signingEvmAdapter.js";
 
 // Real Uniswap V3 deployments for ClawdHQ's own MockUSDC <-> WETH pair, individually verified
 // on-chain before this was wired (a direct QuoterV2.quoteExactInputSingle call against live
@@ -125,19 +125,17 @@ export interface SwapResult {
  * existing allowance is insufficient, and waits for that approval to actually mine before
  * submitting the swap — so a failed or underpriced approval surfaces as its own clear error
  * instead of an opaque swap revert. */
-export async function swapUsdcForWeth(chain: EvmPrismaChain, privateKey: string, amountIn: bigint): Promise<SwapResult> {
+export async function swapUsdcForWeth(chain: EvmPrismaChain, signer: EvmSigner, amountIn: bigint): Promise<SwapResult> {
   if (!isSwapSupportedChain(chain)) {
     throw new Error(`Swapping isn't wired up for ${chain} yet — only Base Sepolia and Ethereum Sepolia have verified Uniswap liquidity for ClawdHQ's USDC.`);
   }
   const deployment = UNISWAP_DEPLOYMENTS[chain];
-  const account = privateKeyToAccount(privateKey as `0x${string}`);
   const viemChain = viemChainFor(chain);
-  const transport = http(rpcUrlFor(chain));
-  const publicClient = createPublicClient({ chain: viemChain, transport });
-  const walletClient = createWalletClient({ account, chain: viemChain, transport });
+  const publicClient = createPublicClient({ chain: viemChain, transport: rpcTransportFor(chain) });
+  const walletClient = createWalletClient({ account: signer.account, chain: viemChain, transport: signer.transport });
   const usdcAddress = usdcAddressFor(chain);
 
-  const balance = await publicClient.readContract({ address: usdcAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
+  const balance = await publicClient.readContract({ address: usdcAddress, abi: ERC20_ABI, functionName: "balanceOf", args: [signer.address] });
   if (balance < amountIn) {
     throw new Error(`Wallet USDC balance (${formatUnits(balance, 6)}) is below the requested swap amount (${formatUnits(amountIn, 6)}).`);
   }
@@ -155,7 +153,7 @@ export async function swapUsdcForWeth(chain: EvmPrismaChain, privateKey: string,
     address: usdcAddress,
     abi: ERC20_ABI,
     functionName: "allowance",
-    args: [account.address, deployment.swapRouter02],
+    args: [signer.address, deployment.swapRouter02],
   });
   if (allowance < amountIn) {
     const approveTxHash = await walletClient.writeContract({
@@ -163,7 +161,7 @@ export async function swapUsdcForWeth(chain: EvmPrismaChain, privateKey: string,
       abi: ERC20_ABI,
       functionName: "approve",
       args: [deployment.swapRouter02, amountIn],
-      account,
+      account: signer.account,
       chain: viemChain,
     });
     const receipt = await publicClient.waitForTransactionReceipt({ hash: approveTxHash });
@@ -183,7 +181,7 @@ export async function swapUsdcForWeth(chain: EvmPrismaChain, privateKey: string,
         address: usdcAddress,
         abi: ERC20_ABI,
         functionName: "allowance",
-        args: [account.address, deployment.swapRouter02],
+        args: [signer.address, deployment.swapRouter02],
       });
       if (confirmedAllowance >= amountIn) break;
       if (attempt >= 5) {
@@ -202,13 +200,13 @@ export async function swapUsdcForWeth(chain: EvmPrismaChain, privateKey: string,
         tokenIn: usdcAddress,
         tokenOut: deployment.weth,
         fee: deployment.feeTier,
-        recipient: account.address,
+        recipient: signer.address,
         amountIn,
         amountOutMinimum,
         sqrtPriceLimitX96: 0n,
       },
     ],
-    account,
+    account: signer.account,
     chain: viemChain,
   });
 

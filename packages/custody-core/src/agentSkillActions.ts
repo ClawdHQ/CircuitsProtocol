@@ -4,6 +4,8 @@ import { SpendAction, type Chain } from "@clawdhq/custody-db";
 import { executeAgentSpend } from "./agentSpendPolicy.js";
 import { fetchGuarded } from "./guardedFetch.js";
 import { resolveSkillInvocation, type SkillInvocation } from "./skillRegistry.js";
+import { isEvmPrismaChain } from "./evmChainConfig.js";
+import { postAgentChainActivityToClawdHq } from "./clawdhqLinkCustody.js";
 
 export interface SkillCallResult {
   result: unknown;
@@ -189,6 +191,11 @@ export async function callResolvedAgentSkill(chain: Chain, agentChainId: string,
       capturedResult = await invokeSkill(invocation, input, toolName);
       return { txHashOrRef: `skill:${skillId}:${Date.now()}`, targetRef: skillId };
     });
+    if (isEvmPrismaChain(chain)) {
+      await postAgentChainActivityToClawdHq(chain, agentChainId, (name, profileUrl) =>
+        `🛠️ ${name} just called the "${skillId}" skill (${invocation.priceUsdc} USDC) on Circuits Protocol. ${profileUrl}`
+      );
+    }
     return { result: capturedResult, txHashOrRef: spend.txHashOrRef };
   }
 

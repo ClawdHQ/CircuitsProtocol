@@ -1,4 +1,6 @@
+import { http, type Transport } from "viem";
 import { bscTestnet, baseSepolia, sepolia, arcTestnet, type Chain as ViemChain } from "viem/chains";
+import { httpWithRateLimitRetry } from "@clawdhq/sdk";
 
 // Portable subset of apps/web/src/lib/chains.ts's EVM chain metadata — reads process.env
 // directly (like apps/indexer/src/config.ts already does) instead of going through apps/web's
@@ -52,6 +54,16 @@ export function viemChainFor(chain: EvmPrismaChain): ViemChain {
 
 export function rpcUrlFor(chain: EvmPrismaChain): string {
   return requireEnv(`NEXT_PUBLIC_${chain}_RPC_URL`);
+}
+
+/** httpWithRateLimitRetry only for Arc (whose public RPC enforces a hard 1req/s limit signaled
+ * via JSON-RPC code -32011 that viem's own built-in retry doesn't cover — see
+ * rateLimitRetryTransport.ts), plain http() everywhere else — same conditional apps/web's
+ * wagmi.ts and evmExchangeReaders.ts already apply, centralized here since every custody-core
+ * signer/public-client construction needs the identical branch. */
+export function rpcTransportFor(chain: EvmPrismaChain): Transport {
+  const url = rpcUrlFor(chain);
+  return chain === "ARC_TESTNET" ? httpWithRateLimitRetry(url) : http(url);
 }
 
 export function contractAddressFor(chain: EvmPrismaChain): `0x${string}` {

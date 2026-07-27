@@ -3,7 +3,7 @@ import { parseUnits } from "viem";
 import { prisma, PipelineStepStatus, type Pipeline, type PipelineStep } from "@clawdhq/custody-db";
 import { getDecryptedPipelineWallet } from "./pipelineCustody.js";
 import { isEvmPrismaChain } from "./evmChainConfig.js";
-import { getSigningEvmAdapter } from "./signingEvmAdapter.js";
+import { getSigningEvmAdapter, localEvmSigner } from "./signingEvmAdapter.js";
 
 export interface PostPipelineStepResult {
   jobChainId: string;
@@ -47,7 +47,7 @@ export async function postPipelineStep(pipeline: Pipeline, step: PipelineStep): 
     const wallet = await getDecryptedPipelineWallet(pipeline.id);
     if (!wallet) throw new Error("No wallet has been provisioned for this pipeline yet — deposit funds first.");
 
-    const adapter = getSigningEvmAdapter(chain, wallet.privateKey);
+    const adapter = getSigningEvmAdapter(chain, localEvmSigner(chain, wallet.privateKey));
 
     // The new job's id is *guessed* (`totalJobs + 1`, read just before submission) since
     // postJob's return value is only a tx hash — same accepted race-condition tradeoff

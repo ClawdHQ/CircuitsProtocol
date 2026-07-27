@@ -5,7 +5,7 @@ import { prisma, SubscriptionRunStatus, type Subscription } from "@clawdhq/custo
 import { getDecryptedSubscriptionWallet } from "./subscriptionCustody.js";
 import { checkSubscriptionRisk } from "./subscriptionRisk.js";
 import { isEvmPrismaChain } from "./evmChainConfig.js";
-import { getSigningEvmAdapter } from "./signingEvmAdapter.js";
+import { getSigningEvmAdapter, localEvmSigner } from "./signingEvmAdapter.js";
 import { isSolanaPrismaChain } from "./solanaChainConfig.js";
 import { getSigningSolanaAdapter, ensureOwnUsdcAta } from "./signingSolanaAdapter.js";
 import { isSuiPrismaChain } from "./suiChainConfig.js";
@@ -71,7 +71,7 @@ export async function runSubscription(subscription: Subscription): Promise<RunSu
       const wallet = await getDecryptedSubscriptionWallet(subscription.id);
       if (!wallet) throw new Error("No wallet has been provisioned for this subscription yet — deposit funds first.");
 
-      const adapter = getSigningEvmAdapter(chain, wallet.privateKey);
+      const adapter = getSigningEvmAdapter(chain, localEvmSigner(chain, wallet.privateKey));
 
       // The new job's id is *guessed* (`totalJobs + 1`, read just before submission) since none
       // of postJob's return values include a usable id — same accepted race-condition tradeoff

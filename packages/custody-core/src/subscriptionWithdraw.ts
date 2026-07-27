@@ -1,6 +1,6 @@
 import { getDecryptedSubscriptionWallet } from "./subscriptionCustody.js";
-import { isEvmPrismaChain, viemChainFor, rpcUrlFor, usdcAddressFor, type EvmPrismaChain } from "./evmChainConfig.js";
-import { withdrawErc20Balance, type Erc20WithdrawResult } from "./signingEvmAdapter.js";
+import { isEvmPrismaChain, type EvmPrismaChain } from "./evmChainConfig.js";
+import { withdrawErc20Balance, localEvmSigner, type Erc20WithdrawResult } from "./signingEvmAdapter.js";
 import { isSolanaPrismaChain, type SolanaPrismaChain } from "./solanaChainConfig.js";
 import { withdrawSolanaUsdcBalance } from "./signingSolanaAdapter.js";
 import { type SuiPrismaChain } from "./suiChainConfig.js";
@@ -19,7 +19,7 @@ export async function withdrawSubscriptionWallet(
   if (!wallet) throw new Error("No wallet has been provisioned for this subscription");
 
   if (isEvmPrismaChain(chain)) {
-    return withdrawErc20Balance(wallet.privateKey, viemChainFor(chain), rpcUrlFor(chain), usdcAddressFor(chain), ownerAddress as `0x${string}`);
+    return withdrawErc20Balance(localEvmSigner(chain, wallet.privateKey), chain, ownerAddress as `0x${string}`);
   }
   if (isSolanaPrismaChain(chain)) {
     return withdrawSolanaUsdcBalance(chain, wallet.privateKey, ownerAddress);

@@ -13,12 +13,15 @@ export { EvmCrossChainIdentityAdapter, type EvmCrossChainIdentityAdapterConfig }
 export { EvmGovernorAdapter, type EvmGovernorAdapterConfig } from "./adapters/evm-governor.js";
 export { EvmCctpAdapter, type EvmCctpAdapterConfig } from "./adapters/evm-cctp.js";
 export { ensureErc20Allowance } from "./adapters/erc20.js";
+export { httpWithRateLimitRetry, type RateLimitRetryOptions } from "./utils/rateLimitRetryTransport.js";
 export { SolanaAdapter, type SolanaAdapterConfig } from "./adapters/solana.js";
 export { SuiAdapter, type SuiAdapterConfig } from "./adapters/sui.js";
 export { RoutingEngine, type RoutingEngineConfig } from "./routing.js";
+export { BUYBACK_INTERVALS } from "./types.js";
 export type {
   AgentSummary,
   BidSummary,
+  BuybackInterval,
   ChainId,
   EvmChainId,
   JobSummary,
