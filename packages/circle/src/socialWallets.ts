@@ -37,16 +37,25 @@ export const SOCIAL_LOGIN_BLOCKCHAINS = [
   Blockchain.SolDevnet,
 ] as const;
 
-export interface DeviceTokenResult {
+export interface EmailOtpDeviceTokenResult {
   deviceToken: string;
   deviceEncryptionKey: string;
+  otpToken: string;
 }
 
-export async function createSocialLoginDeviceToken(client: CircleUserControlledWalletsClient, deviceId: string): Promise<DeviceTokenResult> {
-  const response = await client.createDeviceTokenForSocialLogin({ deviceId });
+/** Requests an email OTP: Circle emails the user a one-time code and returns tokens the frontend
+ * needs to open its hosted verification widget (see sdk.verifyOtp() in useEmailOtpSignIn.ts). */
+export async function createEmailOtpDeviceToken(
+  client: CircleUserControlledWalletsClient,
+  deviceId: string,
+  email: string,
+): Promise<EmailOtpDeviceTokenResult> {
+  const response = await client.createDeviceTokenForEmailLogin({ deviceId, email });
   const data = response.data;
-  if (!data?.deviceToken || !data.deviceEncryptionKey) throw new Error("Circle: device token response missing deviceToken/deviceEncryptionKey");
-  return { deviceToken: data.deviceToken, deviceEncryptionKey: data.deviceEncryptionKey };
+  if (!data?.deviceToken || !data.deviceEncryptionKey || !data.otpToken) {
+    throw new Error("Circle: device token response missing deviceToken/deviceEncryptionKey/otpToken");
+  }
+  return { deviceToken: data.deviceToken, deviceEncryptionKey: data.deviceEncryptionKey, otpToken: data.otpToken };
 }
 
 export interface SocialWallet {
