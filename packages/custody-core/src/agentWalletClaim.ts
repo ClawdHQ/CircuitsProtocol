@@ -3,6 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import bs58 from "bs58";
 import { getDecryptedAgentWallet } from "./agentWalletCustody.js";
+import { getAgentEvmSigner } from "./agentEvmSigner.js";
 import { getDecryptedRegistrarWallet } from "./registrarCustody.js";
 import { isEvmPrismaChain, viemChainFor, rpcUrlFor, usdcAddressFor, type EvmPrismaChain } from "./evmChainConfig.js";
 import { withdrawErc20Balance, readUsdcBalance, type Erc20WithdrawResult } from "./signingEvmAdapter.js";
@@ -130,13 +131,17 @@ async function ensureSuiGasForClaim(chain: SuiPrismaChain, agentAddress: string)
  * verified source, never request input" shape Degen's withdrawal path (degenWithdraw.ts)
  * already uses. */
 export async function claimAgentWallet(chain: ClaimableChain, agentChainId: string, ownerAddress: string): Promise<Erc20WithdrawResult> {
+  if (isEvmPrismaChain(chain)) {
+    const signer = await getAgentEvmSigner(chain, agentChainId);
+    if (!signer) throw new Error("No wallet has been provisioned for this agent");
+    // CIRCLE wallets are gas-sponsored by Circle's own infrastructure, not this app's registrar
+    // — see AgentEvmSigner's own doc comment on custodyType.
+    if (signer.custodyType === "LOCAL") await ensureEvmGasForClaim(chain, signer.address);
+    return withdrawErc20Balance(signer, chain, ownerAddress as `0x${string}`);
+  }
+
   const wallet = await getDecryptedAgentWallet(chain as Chain, agentChainId);
   if (!wallet) throw new Error("No wallet has been provisioned for this agent");
-
-  if (isEvmPrismaChain(chain)) {
-    await ensureEvmGasForClaim(chain, wallet.address as `0x${string}`);
-    return withdrawErc20Balance(wallet.privateKey, viemChainFor(chain), rpcUrlFor(chain), usdcAddressFor(chain), ownerAddress as `0x${string}`);
-  }
   if (isSolanaPrismaChain(chain)) {
     await ensureSolanaFeesForClaim(chain, wallet.address);
     return withdrawSolanaUsdcBalance(chain, wallet.privateKey, ownerAddress);
