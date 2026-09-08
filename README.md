@@ -7,7 +7,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 > **Submission for Binance Agent OS Mini Hackathon — Track A: Agent Infrastructure / Frameworks / Agent OS**  
-> **Live Production dApp**: [https://circuitsprotocol-web.kiwiprotocol.workers.dev](https://circuitsprotocol-web.kiwiprotocol.workers.dev)  
+> **Live Production dApp**: [https://app.circuitsprotocol.com](https://app.circuitsprotocol.com)  
 > **Target Network**: BNB Chain Testnet (BSC Testnet, Chain ID `97`)
 
 ---
@@ -100,7 +100,7 @@ All smart contracts are deployed, initialized, and operational on **BSC Testnet*
 | **Onchain Coordination** | Autonomous bilateral negotiation of deliverables, pricing, and deadlines on-chain before escrow lockup. | `packages/contracts-evm/contracts/ClawdHQNegotiation.sol` |
 | **Economic Accountability** | Mandatory staking bonds, automated slasher integration, and decentralized 3-evaluator dispute resolution. | `packages/contracts-evm/contracts/ClawdHQStaking.sol`<br/>`packages/contracts-evm/contracts/ClawdHQEvaluatorPool.sol` |
 | **Financial Sovereignity** | Fair bonding curve launchpad with automated buyback/burn cadence and DEX graduation to Uniswap V2 on BNB Chain. | `packages/contracts-evm/contracts/ClawdHQLaunchpad.sol`<br/>`packages/contracts-evm/contracts/xero/XeroRouter.sol` |
-| **BNB Native Integration** | Complete deployment on BSC Testnet (97), automated USDC faucet, and tBNB gas subsidy engine. | `packages/contracts-evm/deployments/97.json`<br/>`packages/sdk/src/bnbFaucet.ts` |
+| **BNB Native Integration** | Complete deployment on BSC Testnet (97), native gas compatibility, and multi-chain contract resolver. | `packages/contracts-evm/deployments/97.json` |
 
 ---
 
@@ -129,11 +129,6 @@ When an agent or community launches an equity token:
 - **Automated Buyback & Burn**: Protocol fees and agent revenue trigger automated buybacks based on owner-configured intervals (Daily, Weekly, Monthly).
 - **Graduation to DEX**: Once the curve reaches funding target, liquidity is automatically minted, paired with USDC, and locked permanently in the `XeroRouter` Uniswap V2 pair on BNB Chain.
 
-### 4. 1-Click BNB Faucet & Gas Sponsoring (`packages/sdk/src/bnbFaucet.ts`)
-To make testing friction-free for judges and autonomous agents:
-- Automatically mints **100 MockUSDC** on BSC Testnet.
-- Inspects recipient's native balance: if `< 0.002 tBNB`, automatically sponsors **0.003 tBNB** for gas.
-
 ---
 
 ## Getting Started
@@ -141,7 +136,6 @@ To make testing friction-free for judges and autonomous agents:
 ### Prerequisites
 - Node.js 20+
 - pnpm 9+
-- (Optional) Local PostgreSQL instance if running the full persistent indexer
 
 ### Installation
 
@@ -172,41 +166,15 @@ pnpm --filter @clawdhq/contracts-evm test
 pnpm --filter @clawdhq/contracts-evm deploy:bsc
 ```
 
-### Running the SDK & BNB Faucet
-
-```typescript
-import { fundBnbFaucet } from "@clawdhq/sdk";
-
-// Funds any address with 100 USDC and tBNB gas on BSC Testnet
-const result = await fundBnbFaucet("0xYourAgentOrWalletAddress");
-console.log(`USDC Minted: ${result.usdcTxHash}`);
-if (result.gasTxHash) {
-  console.log(`Gas Sponsored: ${result.gasTxHash}`);
-}
-```
-
-### Running the Multi-Chain Reactive Indexer
-
-```bash
-# Provision databases (optional)
-createdb clawdhq_custody && createdb clawdhq_marketplace && createdb clawdhq_social
-pnpm --filter @clawdhq/custody-db exec prisma migrate deploy
-pnpm --filter @clawdhq/marketplace-db exec prisma migrate deploy
-pnpm --filter @clawdhq/social-db exec prisma migrate deploy
-
-# Run the indexer (listens to BSC Testnet events & triggers DAG steps)
-pnpm --filter @clawdhq/indexer dev
-```
-
 ---
 
 ## Live Demo Walkthrough for Judges
 
 A live, fully functioning web interface connected to BSC Testnet and Arc is accessible at:  
-👉 **[https://circuitsprotocol-web.kiwiprotocol.workers.dev](https://circuitsprotocol-web.kiwiprotocol.workers.dev)**
+👉 **[https://app.circuitsprotocol.com](https://app.circuitsprotocol.com)**
 
 1. **Switch Chain to BNB**: In the top navigation bar, use the chain selector dropdown to toggle between **BNB Chain** (`#F3BA2F`) and Arc.
-2. **Instant BNB Faucet**: Open the portfolio wallet modal and click **Faucet (BNB USDC)** — your wallet will be funded with 100 test USDC and tBNB gas subsidy on BSC Testnet.
+2. **Agent Portfolio**: Open the portfolio wallet overview to inspect balances, positions, and registered agent assets.
 3. **Explore Agents**: Visit `/marketplace` and `/agents` to inspect registered agents, capabilities, and reputation.
 4. **Token Bonding Curves**: Visit `/launchpad` to trade bonding curve tokens or create a new fair-launch agent token.
 5. **Orchestrate Pipelines**: Visit `/orchestrate` to visualize and trigger multi-agent DAG execution pipelines.
@@ -236,12 +204,3 @@ CircuitsProtocol/
 ├── pnpm-workspace.yaml          # Monorepo workspace configuration
 └── turbo.json                   # Turborepo build pipeline configuration
 ```
-
----
-
-## Security & Hackathon Notes
-
-- All smart contracts are written in Solidity `0.8.24` and utilize OpenZeppelin UUPS Upgradeable proxy patterns.
-- BSC Testnet deployments were executed using deployer wallet `0xbf893D75752066b6C45D623772FF4033203DE11E`.
-- The live frontend app is hosted on Cloudflare Workers with serverless proxy routing to Contabo VPS indexer processes.
-- *Testnet demo only. Experimental software submitted for the Binance Agent OS Mini Hackathon.*
