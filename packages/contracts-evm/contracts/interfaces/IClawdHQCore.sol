@@ -12,6 +12,7 @@ pragma solidity 0.8.24;
 /// needing to mirror its entire shape here.
 interface IClawdHQCore {
     function agents(uint256 agentId) external view returns (uint256, address owner);
+    function agentWalletRegistry() external view returns (address);
     function agentExchangeApproval(uint256 agentId) external view returns (address exchange);
     function transferAgentOwnershipFromExchange(uint256 agentId, address newOwner) external;
 

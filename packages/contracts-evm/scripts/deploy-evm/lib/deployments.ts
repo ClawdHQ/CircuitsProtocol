@@ -38,6 +38,22 @@ export interface DeploymentRecord {
   governorProxyAddress?: string;
   governorImplementationAddress?: string;
   governorDeployedAt?: string;
+  /// Xero Protocol (the Uniswap V2 fork) — plain constructor deploys, not proxies, same as
+  /// AgentWalletRegistry above. xeroRouterAddress is what gets wired into
+  /// ClawdHQLaunchpad.uniswapV2Router via 06-configure-fees-and-router.ts's existing
+  /// UNISWAP_V2_ROUTER_ADDRESS env var (no code change needed there).
+  xeroFactoryAddress?: string;
+  xeroRouterAddress?: string;
+  xeroDeployedAt?: string;
+  predictionVaultProxyAddress?: string;
+  predictionVaultImplementationAddress?: string;
+  predictionVaultDeployedAt?: string;
+  perpVaultProxyAddress?: string;
+  perpVaultImplementationAddress?: string;
+  perpVaultDeployedAt?: string;
+  agentTradingVaultProxyAddress?: string;
+  agentTradingVaultImplementationAddress?: string;
+  agentTradingVaultDeployedAt?: string;
 }
 
 const DEPLOYMENTS_DIR = path.resolve(__dirname, "../../../deployments");

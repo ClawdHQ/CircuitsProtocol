@@ -18,8 +18,11 @@ contract AgentToken is ERC20 {
     /// @notice The ClawdHQCore contract that deployed this token and controls the bonding curve.
     address public immutable launchpad;
 
-    /// @notice Set once at graduation; receives half of every post-graduation transfer fee.
+    /// @notice Set once at graduation; receives 30% of every post-graduation transfer fee.
     address public agentTreasury;
+
+    /// @notice Set once at graduation; receives 50% of every post-graduation transfer fee.
+    address public protocolTreasury;
 
     /// @notice True once `graduateToken` has been called by the launchpad.
     bool public graduated;
@@ -50,11 +53,20 @@ contract AgentToken is ERC20 {
     }
 
     /// @notice Called once by the launchpad when the bonding curve graduates. Unlocks
-    /// transfers and designates the treasury that receives half of future transfer fees.
+    /// transfers and designates the treasuries for future transfer fees (50% protocol, 30% agent, 20% burn).
+    function graduateToken(address agentTreasury_, address protocolTreasury_) external onlyLaunchpad {
+        if (graduated) revert AlreadyGraduated();
+        graduated = true;
+        agentTreasury = agentTreasury_;
+        protocolTreasury = protocolTreasury_;
+    }
+
+    /// @notice Backward-compatible single-treasury graduation overload.
     function graduateToken(address agentTreasury_) external onlyLaunchpad {
         if (graduated) revert AlreadyGraduated();
         graduated = true;
         agentTreasury = agentTreasury_;
+        protocolTreasury = agentTreasury_;
     }
 
     /// @notice Burns `amount` from the launchpad's own held (unsold) balance — the launchpad's
@@ -66,7 +78,8 @@ contract AgentToken is ERC20 {
         burnedSupply += amount;
     }
 
-    /// @dev Enforces the pre-graduation transfer lock and applies the post-graduation fee.
+    /// @dev Enforces the pre-graduation transfer lock and applies the post-graduation fee
+    /// (50% protocol treasury, 30% agent treasury, 20% burn).
     function _update(address from, address to, uint256 value) internal override {
         // Minting (from == address(0)) and burning (to == address(0)) bypass the lock/fee logic.
         if (from == address(0) || to == address(0)) {
@@ -86,12 +99,25 @@ contract AgentToken is ERC20 {
             return;
         }
 
-        uint256 halfFee = fee / 2;
+        uint256 protocolShare = (fee * 50) / 100;
+        uint256 creatorShare = (fee * 30) / 100;
+        uint256 burnShare = fee - protocolShare - creatorShare; // 20%
         uint256 netAmount = value - fee;
 
         super._update(from, to, netAmount);
-        super._update(from, address(0), halfFee);
-        burnedSupply += halfFee;
-        super._update(from, agentTreasury, fee - halfFee);
+
+        if (burnShare > 0) {
+            super._update(from, address(0), burnShare);
+            burnedSupply += burnShare;
+        }
+
+        if (protocolShare > 0) {
+            address protoDest = protocolTreasury != address(0) ? protocolTreasury : agentTreasury;
+            super._update(from, protoDest, protocolShare);
+        }
+
+        if (creatorShare > 0) {
+            super._update(from, agentTreasury, creatorShare);
+        }
     }
 }

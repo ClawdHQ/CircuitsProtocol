@@ -17,6 +17,7 @@ export { httpWithRateLimitRetry, type RateLimitRetryOptions } from "./utils/rate
 export { SolanaAdapter, type SolanaAdapterConfig } from "./adapters/solana.js";
 export { SuiAdapter, type SuiAdapterConfig } from "./adapters/sui.js";
 export { RoutingEngine, type RoutingEngineConfig } from "./routing.js";
+export { fundBnbFaucet, type BnbFaucetResult, DEFAULT_BSC_RPC, DEFAULT_BSC_USDC_ADDRESS } from "./bnbFaucet.js";
 export { BUYBACK_INTERVALS } from "./types.js";
 export type {
   AgentSummary,

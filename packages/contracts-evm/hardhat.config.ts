@@ -13,7 +13,7 @@ dotenv.config({ path: "../../.env", quiet: true });
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    return "0x0000000000000000000000000000000000000000000000000000000000000000".slice(0, 66);
+    return "0x0000000000000000000000000000000000000000000000000000000000000001";
   }
   return value;
 }

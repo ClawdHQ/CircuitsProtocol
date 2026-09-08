@@ -632,17 +632,27 @@ contract ClawdHQCore is Initializable, AccessControlUpgradeable, PausableUpgrade
         uint256 amount = escrowRecords[job.jobId];
         escrowRecords[job.jobId] = 0;
 
-        uint256 fee = (amount * protocolFeeBps) / 10_000;
-        uint256 payout = amount - fee;
+        uint256 creatorShare = (amount * 50) / 100;
+        uint256 agentShare = (amount * 30) / 100;
+        uint256 protocolShare = amount - creatorShare - agentShare; // 20%
 
-        usdc.safeTransfer(_payoutAddress(job.hiredAgentId), payout);
-        if (fee > 0) {
-            usdc.safeTransfer(treasury, fee);
+        address creator = agents[job.hiredAgentId].owner;
+        address wallet = IAgentWalletRegistry(_agentWalletRegistry).agentWallet(job.hiredAgentId);
+        address agentDest = wallet != address(0) ? wallet : creator;
+
+        if (creatorShare > 0) {
+            usdc.safeTransfer(creator, creatorShare);
+        }
+        if (agentShare > 0) {
+            usdc.safeTransfer(agentDest, agentShare);
+        }
+        if (protocolShare > 0 && treasury != address(0)) {
+            usdc.safeTransfer(treasury, protocolShare);
         }
 
         AgentCard storage agent = agents[job.hiredAgentId];
         agent.jobsCompleted++;
-        agent.usdcRevenue += uint128(payout);
+        agent.usdcRevenue += uint128(creatorShare + agentShare);
         agent.lastJobAt = uint64(block.timestamp);
 
         if (rating > 0) {
@@ -653,7 +663,7 @@ contract ClawdHQCore is Initializable, AccessControlUpgradeable, PausableUpgrade
 
         totalVolume += amount;
 
-        emit JobCompleted(job.jobId, job.hiredAgentId, payout, rating);
+        emit JobCompleted(job.jobId, job.hiredAgentId, creatorShare + agentShare, rating);
     }
 
     function getJobsByAgentCount(uint256) external pure returns (uint256) {

@@ -21,6 +21,10 @@ import {IClawdHQCore} from "./interfaces/IClawdHQCore.sol";
 /// invariant this contract relies on.
 /// @dev Deployed as its own UUPS proxy, deliberately separate from ClawdHQCore, which is
 /// already at the EIP-170 contract-size limit and has no headroom for more logic.
+interface IAgentWalletRegistryExchange {
+    function agentWallet(uint256 agentId) external view returns (address);
+}
+
 contract ClawdHQAgentExchange is Initializable, AccessControlUpgradeable, PausableUpgradeable, UUPSUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -328,12 +332,28 @@ contract ClawdHQAgentExchange is Initializable, AccessControlUpgradeable, Pausab
     }
 
     function _settleSale(Listing storage listing, Bid storage winningBid) private {
-        uint256 fee = (winningBid.amountUsdc * protocolFeeBps) / 10_000;
-        uint256 payout = winningBid.amountUsdc - fee;
+        uint256 creatorShare = (winningBid.amountUsdc * 50) / 100; // 50%
+        uint256 agentShare = (winningBid.amountUsdc * 30) / 100;   // 30%
+        uint256 protocolShare = winningBid.amountUsdc - creatorShare - agentShare; // 20%
 
-        usdc.safeTransfer(listing.seller, payout);
-        if (fee > 0) {
-            usdc.safeTransfer(treasury, fee);
+        address wallet = address(0);
+        try core.agentWalletRegistry() returns (address registry) {
+            if (registry != address(0)) {
+                try IAgentWalletRegistryExchange(registry).agentWallet(listing.agentId) returns (address w) {
+                    wallet = w;
+                } catch {}
+            }
+        } catch {}
+        address agentDest = wallet != address(0) ? wallet : listing.seller;
+
+        if (creatorShare > 0) {
+            usdc.safeTransfer(listing.seller, creatorShare);
+        }
+        if (agentShare > 0) {
+            usdc.safeTransfer(agentDest, agentShare);
+        }
+        if (protocolShare > 0 && treasury != address(0)) {
+            usdc.safeTransfer(treasury, protocolShare);
         }
 
         core.transferAgentOwnershipFromExchange(listing.agentId, winningBid.bidder);
